@@ -1,0 +1,40 @@
+<fieldset>
+    <legend><span>查詢條件</span></legend>
+    <content>
+        <ul class="input-list">
+            <input type="hidden" name="userId" value="yalkyao">
+            <input type="hidden" name="gptId" value="chat5">
+            <input type="hidden" name="page" value="0">
+            <input type="hidden" name="size" value="100">
+            <li id="accountCheckUp">
+                <span>帳號</span>
+                <input name="account" type="text" id="account" value="">
+            </li>
+            <li>
+                <span>來源</span>
+                <select name="from">
+                    <option value="" selected="selected">全部</option>
+                    <option value="User">User</option>
+                    <option value="Gpt">Gpt</option>
+                </select>
+            </li>
+            <li>
+                <span>對話內容</span>
+                <input name="content" value="" type="text" placeholder="請輸入關鍵字">
+            </li>
+
+            <li id="customDateRange">
+                <span>訊息起始時間</span>
+                <input name="startDate" type="date" id="startDate" value="2025-08-31">
+            </li>
+            <li id="customDateRangeEnd">
+                <span>訊息迄止時間</span>
+                <input name="endDate" type="date" id="endDate" value="2025-09-06">
+            </li>
+
+        </ul>
+    </content>
+    <control>
+        <button id="queryButton" class="search-icon" type="submit"></button>
+    </control>
+</fieldset>

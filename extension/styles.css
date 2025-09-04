@@ -1,0 +1,23 @@
+#ucduc-panel{
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 360px;
+  max-height: 60vh;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+}
+#ucduc-panel .ucduc-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 8px 10px; background:#f6f8fa; border-bottom:1px solid #eee;
+}
+#ucduc-panel .ucduc-actions button{ margin-left:6px; }
+#ucduc-panel .ucduc-body{ padding:8px; overflow:auto; }
+#ucduc-panel table{ width:100%; border-collapse: collapse; }
+#ucduc-panel th, #ucduc-panel td{ border-bottom:1px solid #eee; padding:4px 6px; text-align:left; }

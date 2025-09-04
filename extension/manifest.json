@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "UserChat Daily Unique Users Counter",
+  "version": "0.1.0",
+  "description": "在 MIS Bot 平台查詢頁面計算每日唯一使用人數（同一用戶同日只計一次）。",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://misbot-beta.mitac.com.tw/pms/platformAnalysis/UserChat*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "https://misbot-beta.mitac.com.tw/*"
+  ]
+}
