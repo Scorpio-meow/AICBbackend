@@ -2,8 +2,8 @@
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: 360px;
-  max-height: 60vh;
+  width: 480px;
+  max-height: 70vh;
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 8px;
@@ -14,10 +14,152 @@
   flex-direction: column;
 }
 #ucduc-panel .ucduc-header{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex; align-items:flex-start; justify-content:space-between;
   padding: 8px 10px; background:#f6f8fa; border-bottom:1px solid #eee;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-#ucduc-panel .ucduc-actions button{ margin-left:6px; }
+
+#ucduc-panel .ucduc-header strong {
+  margin-right: auto;
+  margin-top: 4px;
+}
+
+#ucduc-panel .ucduc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  max-width: 70%;
+}
+#ucduc-panel .ucduc-actions button{ 
+  margin: 0;
+  padding: 3px 6px;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  background: #f6f8fa;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+#ucduc-panel .ucduc-actions button:hover{
+  background: #f3f4f6;
+  border-color: #8c959f;
+}
+#ucduc-panel .ucduc-actions button:active{
+  background: #ebecf0;
+}
+/* Active state for toggle buttons */
+#ucduc-panel .ucduc-actions button[data-active="true"]{
+  background: #0969da;
+  color: white;
+  border-color: #0969da;
+}
+
+/* Toggle buttons (view selection) */
+#ucduc-panel .ucduc-actions button[id*="toggle"] {
+  background: #e1f5fe;
+  border-color: #0969da;
+  color: #0969da;
+}
+
+#ucduc-panel .ucduc-actions button[id*="toggle"]:hover {
+  background: #bbdefb;
+}
+
+/* Action buttons (scan, export) */
+#ucduc-panel .ucduc-actions button#ucduc-scan,
+#ucduc-panel .ucduc-actions button#ucduc-export {
+  background: #f0f9ff;
+  border-color: #0ea5e9;
+  color: #0ea5e9;
+}
+
+#ucduc-panel .ucduc-actions button#ucduc-scan:hover,
+#ucduc-panel .ucduc-actions button#ucduc-export:hover {
+  background: #e0f2fe;
+}
+
+/* Close button */
+#ucduc-panel .ucduc-actions button#ucduc-close {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #dc2626;
+  font-weight: bold;
+  min-width: 24px;
+}
 #ucduc-panel .ucduc-body{ padding:8px; overflow:auto; }
-#ucduc-panel table{ width:100%; border-collapse: collapse; }
+#ucduc-panel table{ width:100%; border-collapse: collapse; font-size: 12px; }
 #ucduc-panel th, #ucduc-panel td{ border-bottom:1px solid #eee; padding:4px 6px; text-align:left; }
+
+/* KPI Table specific styles */
+#ucduc-kpi-table th {
+  background: #f6f8fa;
+  font-weight: 600;
+  color: #24292f;
+}
+#ucduc-kpi-table td:nth-child(2) {
+  font-weight: 600;
+  color: #0969da;
+  text-align: center;
+}
+#ucduc-kpi-table td:nth-child(3) {
+  color: #656d76;
+  font-size: 11px;
+}
+#ucduc-kpi-table tr:hover {
+  background: #f6f8fa;
+}
+
+/* Log table specific styles */
+#ucduc-incl-log-table th {
+  background: #f6f8fa;
+  font-weight: 600;
+  color: #24292f;
+  position: sticky;
+  top: 0;
+}
+
+#ucduc-incl-log-table td:nth-child(4), /* 是否得到解決 */
+#ucduc-incl-log-table td:nth-child(5) { /* 回答正確率 */
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Resolution status color coding */
+#ucduc-incl-log-table td:nth-child(4) {
+  color: #0969da;
+}
+
+/* Content columns with ellipsis */
+#ucduc-incl-log-table td:nth-child(2), /* 用戶問題 */
+#ucduc-incl-log-table td:nth-child(3) { /* GPT回答 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
+#ucduc-incl-log-table td:nth-child(2) {
+  max-width: 200px;
+}
+
+#ucduc-incl-log-table td:nth-child(3) {
+  max-width: 250px;
+  font-style: italic;
+  color: #656d76;
+}
+
+/* Accuracy rate color coding */
+#ucduc-incl-log-table td:nth-child(5) {
+  color: #656d76;
+}
+
+#ucduc-incl-log-table tr:hover {
+  background: #f6f8fa;
+}
+
+#ucduc-incl-log-table tr:hover td {
+  background: transparent !important;
+}
