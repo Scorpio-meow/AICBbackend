@@ -1,8 +1,12 @@
 {
   "manifest_version": 3,
   "name": "UserChat Daily Unique Users Counter",
-  "version": "0.1.0",
-  "description": "在 MIS Bot 平台查詢頁面計算每日唯一使用人數（同一用戶同日只計一次）。",
+  "version": "0.2.0",
+  "description": "在 MIS Bot 平台查詢頁面計算每日唯一使用人數，並以 LLM 評估解決率與回答正確率。",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -14,6 +18,12 @@
     }
   ],
   "host_permissions": [
-    "https://misbot-beta.mitac.com.tw/*"
+    "https://misbot-beta.mitac.com.tw/*",
+    "https://blowfish-absolute-absolutely.ngrok-free.app/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "permissions": [
+    "storage"
   ]
 }

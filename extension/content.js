@@ -2,7 +2,7 @@
     // Excluded accounts (not counted in main stats), but logged separately
     const EXCLUDED_USERS = new Set([
         // 實習生
-        'yalkyao', 'chenxi', 'yingzhiw', 'yutachen', 'yziang',
+        'yalkyao','chenxi', 'yingzhiw', 'yutachen', 'yziang',
         // PM成員
         'yuyuanwang', 'dorislin920', 'emmalai',
         // 高度相關人員
@@ -224,17 +224,25 @@
             // Analyze GPT response quality if available
             let assessment = { resolved: '未知', accuracy: '0%' };
             if (pair.gptResponse && pair.gptResponse.content) {
+                // Use local heuristic only as a fallback; mark as pending for LLM
                 assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
             }
             
-            out.push({
+            const pushed = {
                 userId: pair.userQuestion.userId,
                 content: pair.userQuestion.content || '',
                 gptResponse: pair.gptResponse ? pair.gptResponse.content || '' : '無回應',
                 resolved: assessment.resolved,
                 accuracy: assessment.accuracy,
                 time: formatYMDHMS(dt)
-            });
+            };
+
+            if (pair.gptResponse && pair.gptResponse.content) {
+                pushed.resolved = 'AI審核中';
+                pushed.accuracy = '審核中';
+            }
+
+            out.push(pushed);
         });
         
         // sort by time asc
@@ -260,12 +268,13 @@
         const newUsers = new Set(); // users appearing for first time this week
         const returningUsers = new Set(); // users who appeared before this week
         
-        let totalQueries = 0;
+    let totalQueries = 0;
         let peakHour = 0;
         let peakHourQueries = 0;
         let resolvedCount = 0;
         let totalAccuracyScore = 0;
         let resolutionAttempts = 0;
+    let kpiPending = false; // true if any pair still waiting for LLM result
 
         // Process all historical data to identify new vs returning users
         const allHistoricalUsers = new Set();
@@ -286,42 +295,92 @@
 
         // Process current week data with GPT response analysis
         const userGptPairs = groupUserGptPairs(allWeekRows);
+
+        // Quick pre-check: if any pair has a GPT response but no finalized LLM cache result,
+        // mark KPI as pending so UI shows '計算中'. This covers cases where local fallback
+        // assessment returned neutral 0% and we still want to indicate async LLM is pending.
+        try {
+            for (const pair of userGptPairs) {
+                if (pair.gptResponse && pair.gptResponse.content) {
+                    const key = hashKey(pair.userQuestion?.content || '', pair.gptResponse.content || '');
+                    if (!__llmCache.has(key) || (typeof __llmCache.get(key) === 'object' && typeof __llmCache.get(key).then === 'function')) {
+                        kpiPending = true;
+                        break;
+                    }
+                }
+            }
+        } catch (e) {
+            // on any error, conservatively mark pending
+            kpiPending = true;
+        }
         console.debug('ucduc: KPI calculation - userGptPairs count:', userGptPairs.length);
         
         userGptPairs.forEach(pair => {
             if (!pair.userQuestion) return;
-            
             const hour = toHour(pair.userQuestion.time);
             let assessment = { resolved: '未知', accuracy: '0%' };
-            
-            // Analyze GPT response quality if available
+
+            // If GPT responded, check if LLM cache has a finalized result; if not, mark KPI as pending
             if (pair.gptResponse && pair.gptResponse.content) {
-                assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
-                console.debug('ucduc: GPT response assessment:', {
-                    user: pair.userQuestion.userId,
-                    question: pair.userQuestion.content,
-                    resolved: assessment.resolved,
-                    accuracy: assessment.accuracy,
-                    hasGptResponse: !!pair.gptResponse
-                });
+                try {
+                    const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
+                    if (__llmCache.has(key)) {
+                        const cached = __llmCache.get(key);
+                        const isInFlight = cached && typeof cached.then === 'function';
+                        const isFinal = !isInFlight && cached && cached.resolved;
+                        if (isFinal) {
+                            assessment = { resolved: cached.resolved, accuracy: cached.accuracy };
+                        } else {
+                            // fallback to local assessment but mark pending
+                            assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
+                            kpiPending = true;
+                        }
+                    } else {
+                        assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
+                        kpiPending = true;
+                    }
+                    console.debug('ucduc: GPT response assessment (pair):', {
+                        user: pair.userQuestion.userId,
+                        question: pair.userQuestion.content,
+                        resolved: assessment.resolved,
+                        accuracy: assessment.accuracy,
+                        hasGptResponse: !!pair.gptResponse,
+                        kpiPending
+                    });
+                } catch (e) {
+                    assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
+                    kpiPending = true;
+                }
             } else {
                 console.debug('ucduc: No GPT response found for user:', pair.userQuestion.userId);
             }
-            
+
             uniqueUsers.add(pair.userQuestion.userId);
             totalQueries++;
             resolutionAttempts++;
             
             // Calculate resolution statistics based on GPT response quality
-            if (assessment.resolved === '是') {
-                resolvedCount++;
-            } else if (assessment.resolved === '部分') {
-                resolvedCount += 0.5; // Partial resolution counts as half
+            if (assessment && typeof assessment.resolved === 'string') {
+                if (assessment.resolved === '是') {
+                    resolvedCount++;
+                } else if (assessment.resolved === '部分') {
+                    resolvedCount += 0.5; // Partial resolution counts as half
+                }
             }
-            
+
             // Calculate accuracy score (convert percentage to number)
-            const accuracyNum = parseFloat(assessment.accuracy.replace('%', '')) || 0;
-            totalAccuracyScore += accuracyNum;
+            // Skip accuracy when it's a placeholder like '審核中' or non-numeric
+            let accuracyNum = 0;
+            if (assessment && assessment.accuracy && typeof assessment.accuracy === 'string') {
+                const cleaned = assessment.accuracy.replace('%', '').replace(/[^0-9.]/g, '').trim();
+                if (cleaned.length > 0) {
+                    const parsed = parseFloat(cleaned);
+                    if (!isNaN(parsed)) {
+                        accuracyNum = parsed;
+                        totalAccuracyScore += accuracyNum;
+                    }
+                }
+            }
             
             // Daily active users
             if (!dailyActiveUsers.has(pair.userQuestion.day)) {
@@ -400,6 +459,7 @@
             avgAccuracyRate: avgAccuracyRate,
             avgResolutionAttempts: avgResolutionAttempts,
             unresolvedQueries: unresolvedQueries,
+            kpiPending: kpiPending,
             newUsers: newUsers.size,
             returningUsers: returningUsers.size
         };
@@ -670,126 +730,62 @@
         }
     };
 
-    // Intelligent resolution and accuracy assessment for GPT responses
-    // Assess the quality of GPT responses based on content analysis
+    // Previously this function used keyword-based heuristics to assess GPT responses.
+    // The keyword scoring has been removed. Keep a simple neutral fallback so
+    // background LLM assessments (if available) can still overwrite results.
     const assessGptResponseQuality = (content, userQuestion = '') => {
         if (!content) return { resolved: '未知', accuracy: '0%' };
-        
-        const contentLower = content.toLowerCase().trim();
-        const questionLower = userQuestion ? userQuestion.toLowerCase().trim() : '';
-        
-        // Keywords indicating comprehensive/helpful responses
-        const goodResponseKeywords = [
-            '根據公司', '根據', '文件', '程序', '作業程序', '以下是', '以下', 
-            '詳細步驟', '具體方法', '完整說明', '範例', '示例', '教學', '指導',
-            '解決方案', '建議', '推薦', '參考', '如下', '按照', '依照',
-            'step by step', 'example', 'tutorial', 'guide', 'solution',
-            '首先', '其次', '然後', '最後', '接下來', '另外', '希望這樣的答案',
-            '可以知道', '處理方式如下', '相關的資訊', '有效期為'
-        ];
-        
-        // Keywords indicating incomplete/unclear responses
-        const poorResponseKeywords = [
-            '抱歉', '無法', '不能', '不清楚', '不確定', '可能', '或許',
-            '請聯繫', '請諮詢', '建議聯繫', '無法提供', '資訊不足', '沒有相關',
-            'sorry', 'unable', 'cannot', 'unclear', 'uncertain', 'maybe',
-            '很抱歉', '不好意思', '暫時無法', '目前無法', '並沒有被提及',
-            '建議您直接聯繫', '進一步諮詢', '沒有相關的資訊'
-        ];
-        
-        // Quality indicators
-        const hasStructuredContent = /[1-9]\.|步驟|方法|流程|程序/.test(contentLower);
-        const hasExamples = /例如|比如|舉例|範例|示例|example/.test(contentLower);
-        const hasDetailedExplanation = contentLower.length > 100;
-        const hasDocumentReference = /根據.*文件|根據公司|作業程序|faq|\.docx/.test(contentLower);
-        const hasApology = poorResponseKeywords.some(keyword => contentLower.includes(keyword));
-        const hasHelpfulKeywords = goodResponseKeywords.some(keyword => contentLower.includes(keyword));
-        const hasStructuredList = /\*\s|•\s|-\s/.test(content);
-        const hasSpecificInfo = /期限|有效期|發生日|個月|時間|折算|薪資/.test(contentLower);
-        
-        // Check for "no information available" responses - these should be marked as unresolved
-        const isNoInfoResponse = /沒有.*資訊|目前沒有|沒有相關|無法直接找到|並沒有被提及|建議您直接聯繫|無法提供|沒有提到|並未提及|沒有明確提及|請查詢|請洽詢|sorry.*can't find|no relevant content/.test(contentLower);
-        
-        // Check for potential topic mismatch based on user question keywords
-        let isPotentialMismatch = false;
-        if (questionLower) {
-            // Common question types and their expected answer indicators
-            const questionTopics = {
-                '特休': ['特休', '特別休假', '年假', '休假天數', '天數'],
-                '喪假': ['喪假', '喪葬假', '請假', '假期'],
-                '婚假': ['婚假', '結婚假', '請假', '假期'],
-                '調薪': ['調薪', '加薪', '薪資調整', '加薪制度'],
-                '職等': ['職等', '職級', '階級', '等級'],
-                '會議室': ['會議室', '預約', '使用流程', '申請']
-            };
-            
-            for (const [topic, indicators] of Object.entries(questionTopics)) {
-                if (questionLower.includes(topic)) {
-                    const hasRelevantContent = indicators.some(indicator => contentLower.includes(indicator));
-                    if (!hasRelevantContent && !isNoInfoResponse) {
-                        isPotentialMismatch = true;
-                        break;
+        // Return neutral defaults; detailed assessment should come from the LLM path.
+        return { resolved: '未知', accuracy: '0%' };
+    };
+
+    // LLM 評估：呼叫背景 service worker，以真正 LLM 回傳結果覆蓋 heuristic
+    // 加上簡單快取避免同一組 Q/A 重複呼叫。
+    const __llmCache = new Map(); // key: hash(question+answer) -> {resolved, accuracy}
+    const hashKey = (q,a) => {
+        try {
+            return btoa(unescape(encodeURIComponent(q.slice(0,500) + '||' + a.slice(0,800))));
+        } catch { return q.length + ':' + a.length; }
+    };
+    // Request LLM assessment via background service worker.
+    // Uses __llmCache to store either a resolved result object or an in-flight Promise
+    // so concurrent requests for the same Q/A are deduplicated.
+    const requestLlmAssessment = (question, answer) => {
+        if (!question || !answer) return Promise.resolve(null);
+        const key = hashKey(question, answer);
+
+        // If we have a cached value which is a final result, return it as a resolved Promise
+        if (__llmCache.has(key)) {
+            const v = __llmCache.get(key);
+            // If it's a Promise (in-flight), return it so callers share the same request
+            if (v && typeof v.then === 'function') return v;
+            return Promise.resolve(v);
+        }
+
+        // Create an in-flight promise and store it immediately to prevent duplicate sends
+        const p = new Promise((resolve) => {
+            try {
+                chrome.runtime.sendMessage({ type: 'llmAssess', question, answer }, (resp) => {
+                    if (!resp || !resp.ok) {
+                        // remove from cache so future attempts may retry
+                        __llmCache.delete(key);
+                        resolve(null);
+                        return;
                     }
-                }
+                    // store the final response object in cache
+                    __llmCache.set(key, resp);
+                    resolve(resp);
+                });
+            } catch (e) {
+                console.warn('ucduc: LLM assessment sendMessage failed', e);
+                __llmCache.delete(key);
+                resolve(null);
             }
-        }
-        
-        // Response quality assessment
-        let resolved = '未知';
-        let accuracy = '50%'; // Default middle value
-        
-        // Handle clear "no information" responses
-        if (isNoInfoResponse) {
-            resolved = '否';
-            accuracy = '30%';
-        }
-        // Handle potential topic mismatch (answering different topic than asked)
-        else if (isPotentialMismatch && hasDetailedExplanation) {
-            resolved = '否';
-            accuracy = '40%';
-        }
-        // Check if it's a genuinely poor response (short apology with no substance)
-        else if ((hasApology || contentLower.includes('無法') || contentLower.includes('不能')) 
-            && !hasDocumentReference && !hasStructuredContent && contentLower.length < 50) {
-            resolved = '否';
-            accuracy = '20%';
-        }
-        // Perfect response: comprehensive answer with all indicators
-        else if (hasDocumentReference && hasStructuredContent && hasDetailedExplanation && hasHelpfulKeywords && !isNoInfoResponse) {
-            // Perfect response: has document reference, structure, detail, and helpful content
-            resolved = '是';
-            accuracy = '95%';
-        } else if ((hasStructuredContent || hasStructuredList) && hasDetailedExplanation && hasDocumentReference) {
-            // Very good response: structured, detailed, with document reference
-            resolved = '是';
-            accuracy = '90%';
-        } else if (hasHelpfulKeywords && hasDetailedExplanation && (hasStructuredContent || hasDocumentReference)) {
-            // Good response: helpful, detailed, with some structure or reference
-            resolved = '是';
-            accuracy = '85%';
-        } else if ((hasStructuredContent || hasExamples || hasSpecificInfo) && hasDetailedExplanation) {
-            // Decent response: some structure/examples and detailed
-            resolved = '部分';
-            accuracy = '75%';
-        } else if (hasHelpfulKeywords && hasDetailedExplanation) {
-            // Okay response: helpful and detailed
-            resolved = '部分';
-            accuracy = '70%';
-        } else if (hasDetailedExplanation) {
-            // Basic response: just detailed
-            resolved = '部分';
-            accuracy = '60%';
-        } else if (contentLower.length > 50) {
-            // Short but substantial response
-            resolved = '部分';
-            accuracy = '50%';
-        } else {
-            // Very short or inadequate response
-            resolved = '否';
-            accuracy = '30%';
-        }
-        
-        return { resolved, accuracy };
+        });
+
+        // store the in-flight promise so concurrent callers reuse it
+        __llmCache.set(key, p);
+        return p;
     };
 
     // Group user questions with corresponding GPT responses using chatId and time-based logic
@@ -885,17 +881,49 @@
             // Analyze GPT response quality if available
             let assessment = { resolved: '未知', accuracy: '0%' };
             if (pair.gptResponse && pair.gptResponse.content) {
+                // Use local heuristic only as a fallback; mark as pending for LLM
                 assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
             }
             
-            out.push({
+            // If there is a GPT response, show that LLM assessment is pending until background result arrives
+            const pushed = {
                 userId: pair.userQuestion.userId,
                 content: pair.userQuestion.content || '',
                 gptResponse: pair.gptResponse ? pair.gptResponse.content || '' : '無回應',
                 resolved: assessment.resolved,
                 accuracy: assessment.accuracy,
                 time: formatYMDHMS(dt)
-            });
+            };
+
+            // If GPT responded, display 'AI審核中' to indicate background LLM will assess
+            if (pair.gptResponse && pair.gptResponse.content) {
+                pushed.resolved = 'AI審核中';
+                pushed.accuracy = '審核中';
+            }
+
+            out.push(pushed);
+
+            // 異步升級為 LLM 評估（只發起一次，避免重複請求）
+            if (pair.gptResponse && pair.gptResponse.content) {
+                requestLlmAssessment(pair.userQuestion.content || '', pair.gptResponse.content || '').then(r => {
+                    if (r && r.resolved) {
+                        const target = out.find(o => o.time === formatYMDHMS(dt) && o.userId === pair.userQuestion.userId);
+                        if (target) {
+                            target.resolved = r.resolved;
+                            target.accuracy = r.accuracy;
+                            // 局部更新: 直接重新渲染整個 log 表 (資料量可接受)
+                            if (window.__ucduc_data) {
+                                window.__ucduc_data.inclRawLog = out;
+                                renderIncludedRawLogTable(out);
+                                // KPI 重新計算 (使用最新評估)
+                                const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || []);
+                                window.__ucduc_data.kpiSummary = kpi;
+                                renderKpiSummary(kpi);
+                            }
+                        }
+                    }
+                });
+            }
         });
         
         out.sort((a, b) => a.time.localeCompare(b.time));
@@ -980,8 +1008,16 @@
         document.getElementById('kpi-peak-hour').textContent = (kpiData.peakHour !== undefined) ? kpiData.peakHour + ':00' : '-';
         document.getElementById('kpi-peak-hour-queries').textContent = kpiData.peakHourQueries || '-';
         document.getElementById('kpi-avg-queries-per-user').textContent = kpiData.avgQueriesPerUser || '-';
-        document.getElementById('kpi-resolution-rate').textContent = (kpiData.resolutionRate !== undefined) ? kpiData.resolutionRate + '%' : '-';
-        document.getElementById('kpi-avg-accuracy').textContent = (kpiData.avgAccuracyRate !== undefined) ? kpiData.avgAccuracyRate + '%' : '-';
+
+        // If any LLM assessments are still pending, show '計算中' for these two fields
+        if (kpiData.kpiPending) {
+            document.getElementById('kpi-resolution-rate').textContent = '計算中';
+            document.getElementById('kpi-avg-accuracy').textContent = '計算中';
+        } else {
+            document.getElementById('kpi-resolution-rate').textContent = (kpiData.resolutionRate !== undefined) ? kpiData.resolutionRate + '%' : '-';
+            document.getElementById('kpi-avg-accuracy').textContent = (kpiData.avgAccuracyRate !== undefined) ? kpiData.avgAccuracyRate + '%' : '-';
+        }
+
         document.getElementById('kpi-avg-attempts').textContent = kpiData.avgResolutionAttempts || '-';
         document.getElementById('kpi-unresolved').textContent = kpiData.unresolvedQueries || '-';
         document.getElementById('kpi-new-users').textContent = kpiData.newUsers || '-';
@@ -1154,6 +1190,7 @@
         data.inclRawLog = inclRawLog;
         data.kpiSummary = kpiSummary;
         window.__ucduc_data = data;
+    window.__ucduc_allRowsForKpi = allRowsForKpi; // 儲存供異步 LLM 更新 KPI
         renderData(data);
     };
 
