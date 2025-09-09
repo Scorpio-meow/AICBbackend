@@ -71,7 +71,7 @@ GPT回答："${answer}"
 
 // Process an array of { question, answer } items in batch with limited concurrency.
 // Returns an array of results in the same order as items.
-async function callLLMBatch(items = [], model = DEFAULT_MODEL, concurrency = 2) {
+async function callLLMBatch(items = [], model = DEFAULT_MODEL, concurrency = 4) {
   if (!Array.isArray(items)) throw new Error('items must be an array');
   const results = new Array(items.length);
 
@@ -101,7 +101,7 @@ async function callLLMBatch(items = [], model = DEFAULT_MODEL, concurrency = 2) 
 }
 
 // Batch with per-item progress notification to a specific tabId (if provided)
-async function callLLMBatchWithProgress(items = [], model = DEFAULT_MODEL, concurrency = 2, tabId = null) {
+async function callLLMBatchWithProgress(items = [], model = DEFAULT_MODEL, concurrency = 4, tabId = null) {
   if (!Array.isArray(items)) throw new Error('items must be an array');
   const results = new Array(items.length);
 
