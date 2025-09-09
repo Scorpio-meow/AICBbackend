@@ -417,12 +417,12 @@
             resolutionAttempts++;
             
             // Calculate resolution statistics based on GPT response quality
+            // Only '是' counts as resolved (1). '部分', '否', '未知' count as unresolved (0 for resolvedCount)
             if (assessment && typeof assessment.resolved === 'string') {
                 if (assessment.resolved === '是') {
                     resolvedCount++;
-                } else if (assessment.resolved === '部分') {
-                    resolvedCount += 0.5; // Partial resolution counts as half
                 }
+                // else: '部分'|'否'|'未知' -> treated as unresolved
             }
 
             // Calculate accuracy score (convert percentage to number)
@@ -491,8 +491,8 @@
         // Calculate average resolution attempts (queries per resolved issue)
         const avgResolutionAttempts = resolvedCount > 0 ? (totalQueries / resolvedCount).toFixed(1) : '1.0';
         
-        // Unresolved queries
-        const unresolvedQueries = Math.round(totalQueries - resolvedCount);
+    // Unresolved queries (do not round; keep fractional values from partial resolutions)
+    const unresolvedQueries = totalQueries - resolvedCount;
 
         console.debug('ucduc: KPI calculation results:', {
             totalQueries,
