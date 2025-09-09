@@ -1010,6 +1010,73 @@
         return p;
     };
 
+    // Batch request version: accepts array of { question, answer, key }
+    // Returns a Promise that resolves to an array of results in the same order as the provided items toSend
+    const requestLlmAssessmentBatch = (items = [], concurrency = 2) => {
+        if (!Array.isArray(items) || items.length === 0) return Promise.resolve([]);
+
+        const toSend = [];
+        const resolvers = Object.create(null);
+
+        items.forEach(it => {
+            const question = it.question || '';
+            const answer = it.answer || '';
+            const key = it.key || hashKey(question, answer);
+            // Skip if no content
+            if (!question || !answer) return;
+
+            // If final cached value exists, skip sending
+            if (__llmCache.has(key)) {
+                const v = __llmCache.get(key);
+                if (v && typeof v.then === 'function') {
+                    // already in-flight, we won't enqueue a duplicate send, but still include for ordering
+                    toSend.push({ question, answer, key });
+                } else {
+                    // final value exists; don't send
+                }
+                return;
+            }
+
+            // create per-key in-flight promise and store resolver
+            let resFn;
+            const p = new Promise((resolve) => { resFn = resolve; });
+            __llmCache.set(key, p);
+            resolvers[key] = resFn;
+            toSend.push({ question, answer, key });
+        });
+
+        if (toSend.length === 0) return Promise.resolve([]);
+
+        return new Promise((resolve) => {
+            try {
+                chrome.runtime.sendMessage({ type: 'llmAssessBatch', items: toSend.map(t => ({ question: t.question, answer: t.answer })), concurrency }, (resp) => {
+                    const results = (resp && resp.ok && Array.isArray(resp.results)) ? resp.results : [];
+                    // Map results back to keys (same order as toSend)
+                    toSend.forEach((t, idx) => {
+                        const r = results[idx] || null;
+                        if (r && r.ok) {
+                            __llmCache.set(t.key, r);
+                            if (resolvers[t.key]) resolvers[t.key](r);
+                        } else if (r) {
+                            // received but ok=false
+                            __llmCache.set(t.key, r);
+                            if (resolvers[t.key]) resolvers[t.key](r);
+                        } else {
+                            // network/parse failure: remove cache so future attempts may retry
+                            __llmCache.delete(t.key);
+                            if (resolvers[t.key]) resolvers[t.key](null);
+                        }
+                    });
+                    resolve(results);
+                });
+            } catch (e) {
+                // cleanup on error
+                toSend.forEach(t => { __llmCache.delete(t.key); if (resolvers[t.key]) resolvers[t.key](null); });
+                resolve([]);
+            }
+        });
+    };
+
     // Group user questions with corresponding GPT responses using chatId and time-based logic
     const groupUserGptPairs = (rows) => {
         const pairs = [];
@@ -1093,7 +1160,11 @@
     const buildIncludedRawLog = (rows) => {
         const out = [];
         const userGptPairs = groupUserGptPairs(rows.filter(r => !EXCLUDED_USERS.has(r.userId)));
-        
+
+        // collect items that need batch LLM assessment
+        const batchItems = [];
+        const batchIndexMap = [];// maps batch item index -> out array index
+
         userGptPairs.forEach((pair) => {
             if (!pair.userQuestion) return;
             
@@ -1124,32 +1195,61 @@
             }
 
             out.push(pushed);
-
-            // 異步升級為 LLM 評估（只發起一次，避免重複請求）
+            // queue for batch assessment if GPT responded
             if (pair.gptResponse && pair.gptResponse.content) {
-                requestLlmAssessment(pair.userQuestion.content || '', pair.gptResponse.content || '').then(r => {
-                    if (r && r.resolved) {
-                        const target = out.find(o => o.time === formatYMDHMS(dt) && o.userId === pair.userQuestion.userId);
-                        if (target) {
-                            target.resolved = r.resolved;
-                            target.accuracy = r.accuracy;
-                            // 局部更新: 直接重新渲染整個 log 表 (資料量可接受)
-                            if (window.__ucduc_data) {
-                                window.__ucduc_data.inclRawLog = out;
-                                renderIncludedRawLogTable(out);
-                                // KPI 重新計算 (使用最新評估)
-                                const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
-                                const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
-                                window.__ucduc_data.kpiSummary = kpi;
-                                renderKpiSummary(kpi);
-                            }
-                        }
+                const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
+                // If a final result exists, we will update immediately; otherwise include in batch
+                const cached = __llmCache.get(key);
+                const hasFinal = cached && typeof cached.then !== 'function';
+                if (hasFinal) {
+                    const final = cached;
+                    if (final && final.resolved) {
+                        pushed.resolved = final.resolved;
+                        pushed.accuracy = final.accuracy;
                     }
-                });
+                } else {
+                    // push to batch list; remember mapping to out index
+                    batchIndexMap.push(out.length - 1);
+                    batchItems.push({ question: pair.userQuestion.content || '', answer: pair.gptResponse.content || '', key });
+                }
             }
         });
-        
         out.sort((a, b) => a.time.localeCompare(b.time));
+
+        // If there are items to batch, send them and update UI progressively when results come back
+        if (batchItems.length > 0) {
+            // Use moderate concurrency; can be overridden later
+            requestLlmAssessmentBatch(batchItems, 4).then((results) => {
+                try {
+                    (results || []).forEach((res, idx) => {
+                        const outIdx = batchIndexMap[idx];
+                        if (outIdx === undefined) return;
+                        if (res && res.ok) {
+                            out[outIdx].resolved = res.resolved;
+                            out[outIdx].accuracy = res.accuracy;
+                        } else {
+                            // failed: leave as 'AI審核中' or set to unknown
+                            out[outIdx].resolved = (res && res.resolved) ? res.resolved : '未知';
+                            out[outIdx].accuracy = (res && res.accuracy) ? res.accuracy : '0%';
+                        }
+                    });
+
+                    // Update global data and UI
+                    if (window.__ucduc_data) {
+                        window.__ucduc_data.inclRawLog = out;
+                        renderIncludedRawLogTable(out);
+                        // KPI 重新計算 (使用最新評估)
+                        const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+                        const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
+                        window.__ucduc_data.kpiSummary = kpi;
+                        renderKpiSummary(kpi);
+                    }
+                } catch (e) {
+                    console.warn('ucduc: batch LLM update failed', e);
+                }
+            });
+        }
+
         return out;
     };
 
@@ -1558,4 +1658,48 @@
     } else {
         document.addEventListener('DOMContentLoaded', init);
     }
+
+    // Listen for per-item batch progress from background and update UI immediately
+    try {
+        chrome.runtime && chrome.runtime.onMessage && chrome.runtime.onMessage.addListener((msg, sender) => {
+            if (!msg || msg.type !== 'llmAssessBatchProgress') return;
+            try {
+                const q = msg.question || '';
+                const a = msg.answer || '';
+                const result = msg.result || null;
+                const key = hashKey(q, a);
+
+                // Update any matching row(s) in current inclRawLog
+                if (window.__ucduc_data && Array.isArray(window.__ucduc_data.inclRawLog)) {
+                    let changed = false;
+                    window.__ucduc_data.inclRawLog.forEach((row) => {
+                        try {
+                            const rowKey = hashKey(row.content || '', row.gptResponse || '');
+                            if (rowKey === key) {
+                                if (result && result.ok) {
+                                    row.resolved = result.resolved;
+                                    row.accuracy = result.accuracy;
+                                } else if (result && !result.ok) {
+                                    row.resolved = '未知';
+                                    row.accuracy = '0%';
+                                }
+                                changed = true;
+                            }
+                        } catch (e) { /* ignore per-row errors */ }
+                    });
+
+                    if (changed) {
+                        renderIncludedRawLogTable(window.__ucduc_data.inclRawLog);
+                        // Recompute KPI with updated cache
+                        try {
+                            const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+                            const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
+                            window.__ucduc_data.kpiSummary = kpi;
+                            renderKpiSummary(kpi);
+                        } catch (e) { /* ignore KPI recalc errors */ }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        });
+    } catch (e) { /* ignore */ }
 })();

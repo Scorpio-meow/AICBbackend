@@ -69,6 +69,84 @@ GPT回答："${answer}"
   return { ok: true, resolved, accuracy };
 }
 
+// Process an array of { question, answer } items in batch with limited concurrency.
+// Returns an array of results in the same order as items.
+async function callLLMBatch(items = [], model = DEFAULT_MODEL, concurrency = 2) {
+  if (!Array.isArray(items)) throw new Error('items must be an array');
+  const results = new Array(items.length);
+
+  // Worker to process a single item index
+  const worker = async (startIndex) => {
+    for (let i = startIndex; i < items.length; i += concurrency) {
+      const it = items[i] || {};
+      try {
+        // ensure strings
+        const q = typeof it.question === 'string' ? it.question : String(it.question || '');
+        const a = typeof it.answer === 'string' ? it.answer : String(it.answer || '');
+        const r = await callLLM(q, a, model);
+        results[i] = r;
+      } catch (e) {
+        results[i] = { ok: false, error: e && e.message ? e.message : String(e) };
+      }
+    }
+  };
+
+  // Launch up to `concurrency` workers
+  const workers = [];
+  const actualConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  for (let w = 0; w < actualConcurrency; w++) workers.push(worker(w));
+
+  await Promise.all(workers);
+  return results;
+}
+
+// Batch with per-item progress notification to a specific tabId (if provided)
+async function callLLMBatchWithProgress(items = [], model = DEFAULT_MODEL, concurrency = 2, tabId = null) {
+  if (!Array.isArray(items)) throw new Error('items must be an array');
+  const results = new Array(items.length);
+
+  // shared pointer for workers
+  let nextIndex = 0;
+  const getNext = () => {
+    const i = nextIndex;
+    nextIndex += 1;
+    return i;
+  };
+
+  const worker = async () => {
+    while (true) {
+      const i = getNext();
+      if (i >= items.length) break;
+      const it = items[i] || {};
+      try {
+        const q = typeof it.question === 'string' ? it.question : String(it.question || '');
+        const a = typeof it.answer === 'string' ? it.answer : String(it.answer || '');
+        const r = await callLLM(q, a, model);
+        results[i] = r;
+        // send progress to content script if tabId available
+        try {
+          if (tabId != null && typeof tabId === 'number') {
+            chrome.tabs.sendMessage(tabId, { type: 'llmAssessBatchProgress', index: i, question: q, answer: a, result: r }, () => {});
+          }
+        } catch (e) { /* ignore */ }
+      } catch (e) {
+        results[i] = { ok: false, error: e && e.message ? e.message : String(e) };
+        try {
+          if (tabId != null && typeof tabId === 'number') {
+            chrome.tabs.sendMessage(tabId, { type: 'llmAssessBatchProgress', index: i, question: String(it.question || ''), answer: String(it.answer || ''), result: results[i] }, () => {});
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+  };
+
+  const actualConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  const workers = [];
+  for (let w = 0; w < actualConcurrency; w++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'llmAssess') {
     (async () => {
@@ -80,5 +158,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     })();
     return true; // async response
+  }
+  // Batch assessment: expect msg.items = [{question, answer}, ...], optional model, optional concurrency
+  if (msg && msg.type === 'llmAssessBatch') {
+    (async () => {
+      try {
+        const items = Array.isArray(msg.items) ? msg.items : [];
+        const concurrency = Number.isInteger(msg.concurrency) ? Math.max(1, msg.concurrency) : 4;
+        const model = msg.model || DEFAULT_MODEL;
+  // Prefer sender.tab.id for progress notifications when available (auto-push to requesting tab)
+  const inferredTabId = (sender && sender.tab && typeof sender.tab.id === 'number') ? sender.tab.id : null;
+  const explicitTabId = (msg.tabId !== undefined && msg.tabId !== null) ? Number(msg.tabId) : null;
+  const tabId = (inferredTabId !== null) ? inferredTabId : explicitTabId;
+  const results = await callLLMBatchWithProgress(items, model, concurrency, tabId);
+  sendResponse({ ok: true, results });
+      } catch (e) {
+        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+      }
+    })();
+    return true;
   }
 });
