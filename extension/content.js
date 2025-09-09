@@ -1027,78 +1027,106 @@
     
 
 
-    // CSV export
+    // CSV export (exactly 4 tables: KPI摘要, 每日統計, 時段分析, 詳細log)
     const exportCSV = () => {
         const data = window.__ucduc_data;
         if (!data) return;
 
-        // Export both daily summary and detailed log
-        let csvContent = '';
-        
-        // Daily Summary Section
+        // helper to CSV-escape a value
+        const esc = (v) => {
+            if (v === null || v === undefined) return '""';
+            const s = String(v);
+            return '"' + s.replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+        };
+
+        const parts = [];
+
+        // 1) KPI 摘要
+        if (data.kpiSummary) {
+            parts.push('=== KPI摘要 ===');
+            parts.push(['指標', '數值', '備註'].map(esc).join(','));
+            const k = data.kpiSummary;
+            parts.push([ '週起', k.weekStart || '-', '' ].map(esc).join(','));
+            parts.push([ '週終', k.weekEnd || '-', '' ].map(esc).join(','));
+            parts.push([ '日活平均DAU', k.avgDau || '-', '' ].map(esc).join(','));
+            parts.push([ '週活WAU', k.wau || '-', '' ].map(esc).join(','));
+            parts.push([ '本週查詢總數', k.totalQueries || '-', '' ].map(esc).join(','));
+            parts.push([ '高峰時段', (k.peakHour !== undefined) ? (k.peakHour + ':00') : '-', '' ].map(esc).join(','));
+            parts.push([ '高峰時段查詢數', k.peakHourQueries || '-', '' ].map(esc).join(','));
+            parts.push([ '每用戶平均查詢', k.avgQueriesPerUser || '-', '' ].map(esc).join(','));
+            parts.push([ '解決率(%)', (k.kpiPending ? '計算中' : (k.resolutionRate !== undefined ? k.resolutionRate + '%' : '-')), '基於內容分析' ].map(esc).join(','));
+            parts.push([ '平均回答正確率(%)', (k.kpiPending ? '計算中' : (k.avgAccuracyRate !== undefined ? k.avgAccuracyRate + '%' : '-')), '基於內容分析' ].map(esc).join(','));
+            parts.push([ '平均解決嘗試次數', k.avgResolutionAttempts || '-', '基於解決數量' ].map(esc).join(','));
+            parts.push([ '未解決數量', k.unresolvedQueries || '-', '' ].map(esc).join(','));
+            parts.push([ '本週新用戶', k.newUsers || '-', '' ].map(esc).join(','));
+            parts.push([ '本週回訪用戶', k.returningUsers || '-', '' ].map(esc).join(','));
+        }
+
+        // 2) 每日統計
+        parts.push('');
+        parts.push('=== 每日統計 ===');
         const gptSet = new Set();
         Object.values(data.dailyByGpt || {}).forEach((byGpt) => {
             Object.keys(byGpt).forEach(g => gptSet.add(g));
         });
         const gptList = Array.from(gptSet).sort();
-
-        const headers = ['日期', '唯一人次', ...gptList];
-        csvContent += '=== 每日使用人次統計 ===\n';
-        csvContent += headers.join(',') + '\n';
-
-        data.daily.forEach(({ day, uniqueUsers }) => {
+        const dailyHeaders = ['日期', '唯一人次', ...gptList];
+        parts.push(dailyHeaders.map(esc).join(','));
+        (data.daily || []).forEach(({ day, uniqueUsers }) => {
             const row = [day, uniqueUsers];
             gptList.forEach((g) => {
-                const v = (data.dailyByGpt[day] && data.dailyByGpt[day][g]) ? data.dailyByGpt[day][g] : 0;
+                const v = (data.dailyByGpt && data.dailyByGpt[day] && data.dailyByGpt[day][g]) ? data.dailyByGpt[day][g] : 0;
                 row.push(v);
             });
-            csvContent += row.join(',') + '\n';
+            parts.push(row.map(esc).join(','));
         });
 
-        // Detailed Log Section
-        csvContent += '\n=== 詳細使用記錄 ===\n';
+        // 3) 時段分析
+        parts.push('');
+        parts.push('=== 時段分析 ===');
+        // hourDist expected at data.hourDist: { hourTotals, hourByUser, userList }
+        const hourDist = data.hourDist || { hourTotals: Array.from({ length: 24 }, () => 0), hourByUser: {}, userList: [] };
+        const hourHeaders = ['時段(0-23)', '查詢數', ... (hourDist.userList || [])];
+        parts.push(hourHeaders.map(esc).join(','));
+        const hourTotals = hourDist.hourTotals || Array.from({ length: 24 }, () => 0);
+        for (let h = 0; h < 24; h++) {
+            const row = [String(h), hourTotals[h] || 0];
+            (hourDist.userList || []).forEach(uid => {
+                const v = (hourDist.hourByUser && hourDist.hourByUser[h] && hourDist.hourByUser[h][uid]) ? hourDist.hourByUser[h][uid] : 0;
+                row.push(v);
+            });
+            parts.push(row.map(esc).join(','));
+        }
+
+        // 4) 詳細log
+        parts.push('');
+        parts.push('=== 詳細log ===');
         const logHeaders = ['UserId', '用戶問題', 'GPT回答', '是否得到解決', '回答正確率', '對話時間'];
-        csvContent += logHeaders.join(',') + '\n';
-        
+        parts.push(logHeaders.map(esc).join(','));
         (data.inclRawLog || []).forEach((r) => {
-            const userQuestion = (r.content || '').replace(/[,\n\r]/g, ' ').trim();
-            const gptResponse = (r.gptResponse || '').replace(/[,\n\r]/g, ' ').trim();
             const row = [
                 r.userId || '',
-                `"${userQuestion}"`,
-                `"${gptResponse}"`,
+                r.content || '',
+                r.gptResponse || '',
                 r.resolved || '',
                 r.accuracy || '',
                 r.time || ''
             ];
-            csvContent += row.join(',') + '\n';
+            parts.push(row.map(esc).join(','));
         });
 
-        // KPI Summary Section
-        if (data.kpiSummary) {
-            csvContent += '\n=== KPI摘要 ===\n';
-            csvContent += '指標,數值,備註\n';
-            csvContent += `週起,${data.kpiSummary.weekStart || '-'},\n`;
-            csvContent += `週終,${data.kpiSummary.weekEnd || '-'},\n`;
-            csvContent += `日活平均DAU,${data.kpiSummary.avgDau || '-'},\n`;
-            csvContent += `週活WAU,${data.kpiSummary.wau || '-'},\n`;
-            csvContent += `本週查詢總數,${data.kpiSummary.totalQueries || '-'},\n`;
-            csvContent += `高峰時段,${(data.kpiSummary.peakHour !== undefined) ? data.kpiSummary.peakHour + ':00' : '-'},\n`;
-            csvContent += `高峰時段查詢數,${data.kpiSummary.peakHourQueries || '-'},\n`;
-            csvContent += `每用戶平均查詢,${data.kpiSummary.avgQueriesPerUser || '-'},\n`;
-            csvContent += `解決率(%),${(data.kpiSummary.resolutionRate !== undefined) ? data.kpiSummary.resolutionRate + '%' : '-'},基於內容分析\n`;
-            csvContent += `平均回答正確率(%),${(data.kpiSummary.avgAccuracyRate !== undefined) ? data.kpiSummary.avgAccuracyRate + '%' : '-'},基於內容分析\n`;
-            csvContent += `平均解決嘗試次數,${data.kpiSummary.avgResolutionAttempts || '-'},基於解決數量\n`;
-            csvContent += `未解決數量,${data.kpiSummary.unresolvedQueries || '-'},\n`;
-            csvContent += `本週新用戶,${data.kpiSummary.newUsers || '-'},\n`;
-            csvContent += `本週回訪用戶,${data.kpiSummary.returningUsers || '-'},\n`;
-        }
+        const csvContent = parts.join('\n');
+
+        const weekStart = (data.kpiSummary && data.kpiSummary.weekStart) ? data.kpiSummary.weekStart : null;
+        const weekEnd = (data.kpiSummary && data.kpiSummary.weekEnd) ? data.kpiSummary.weekEnd : null;
+        const nameSuffix = (weekStart && weekEnd) ? `${weekStart}_to_${weekEnd}` : new Date().toISOString().slice(0,10);
+        const filename = `user_chat_analysis_${nameSuffix}.csv`;
 
         const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'user_chat_analysis_complete.csv';
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
     };
