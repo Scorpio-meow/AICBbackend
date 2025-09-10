@@ -322,8 +322,6 @@
         const dailyActiveUsers = new Map(); // day -> Set of users
         const hourlyQueries = new Map(); // hour -> count
         const userQueryCounts = new Map(); // userId -> count
-        const newUsers = new Set(); // users appearing for first time this week
-        const returningUsers = new Set(); // users who appeared before this week
         
     let totalQueries = 0;
         let peakHour = 0;
@@ -452,13 +450,6 @@
             
             // User query counts
             userQueryCounts.set(pair.userQuestion.userId, (userQueryCounts.get(pair.userQuestion.userId) || 0) + 1);
-            
-            // New vs returning users
-            if (allHistoricalUsers.has(pair.userQuestion.userId)) {
-                returningUsers.add(pair.userQuestion.userId);
-            } else {
-                newUsers.add(pair.userQuestion.userId);
-            }
         });
 
         // Find peak hour
@@ -517,8 +508,6 @@
             avgResolutionAttempts: avgResolutionAttempts,
             unresolvedQueries: unresolvedQueries,
             kpiPending: kpiPending,
-            newUsers: newUsers.size,
-            returningUsers: returningUsers.size
         };
     };
     // Render floating panel
@@ -557,17 +546,15 @@
                                 <tr><td>週起 (Week Start)</td><td id="kpi-week-start">-</td><td></td></tr>
                                 <tr><td>週終 (Week End)</td><td id="kpi-week-end">-</td><td></td></tr>
                                 <tr><td>日活平均 DAU (avg)</td><td id="kpi-avg-dau">-</td><td></td></tr>
-                                <tr><td>週活 WAU (weekly active users)</td><td id="kpi-wau">-</td><td></td></tr>
-                                <tr><td>本週查詢總數</td><td id="kpi-total-queries">-</td><td></td></tr>
+                                <tr><td>活躍用戶 AU (Active Users)</td><td id="kpi-wau">-</td><td></td></tr>
+                                <tr><td>查詢總數</td><td id="kpi-total-queries">-</td><td></td></tr>
                                 <tr><td>高峰時段 (時)</td><td id="kpi-peak-hour">-</td><td></td></tr>
                                 <tr><td>高峰時段查詢數</td><td id="kpi-peak-hour-queries">-</td><td></td></tr>
                                 <tr><td>每用戶平均查詢 (週)</td><td id="kpi-avg-queries-per-user">-</td><td></td></tr>
                                 <tr><td>解決率 (%)</td><td id="kpi-resolution-rate">-</td><td>AI分析</td></tr>
                                 <tr><td>平均回答正確率 (%)</td><td id="kpi-avg-accuracy">-</td><td>AI分析</td></tr>
                                 <tr><td>平均解決嘗試次數</td><td id="kpi-avg-attempts">-</td><td></td></tr>
-                                <tr><td>未解決數量</td><td id="kpi-unresolved">-</td><td></td></tr>
-                                <tr><td>本週新用戶</td><td id="kpi-new-users">-</td><td></td></tr>
-                                <tr><td>本週回訪用戶</td><td id="kpi-returning-users">-</td><td></td></tr>
+                                <tr><td>未解決數量</td><td id="kpi-unresolved">-</td><td>否+部分</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1249,8 +1236,6 @@
             document.getElementById('kpi-avg-attempts').textContent = kpiData.avgResolutionAttempts || '-';
             document.getElementById('kpi-unresolved').textContent = kpiData.unresolvedQueries || '-';
         }
-        document.getElementById('kpi-new-users').textContent = kpiData.newUsers || '-';
-        document.getElementById('kpi-returning-users').textContent = kpiData.returningUsers || '-';
     };
 
     // Ensure pager links on the page use size=100 to show 100 items per page
@@ -1325,8 +1310,8 @@
             parts.push([ '週起', k.weekStart || '-', '' ].map(esc).join(','));
             parts.push([ '週終', k.weekEnd || '-', '' ].map(esc).join(','));
             parts.push([ '日活平均DAU', k.avgDau || '-', '' ].map(esc).join(','));
-            parts.push([ '週活WAU', k.wau || '-', '' ].map(esc).join(','));
-            parts.push([ '本週查詢總數', k.totalQueries || '-', '' ].map(esc).join(','));
+            parts.push([ '活躍用戶AU', k.wau || '-', '' ].map(esc).join(','));
+            parts.push([ '查詢總數', k.totalQueries || '-', '' ].map(esc).join(','));
             parts.push([ '高峰時段', (k.peakHour !== undefined) ? (k.peakHour + ':00') : '-', '' ].map(esc).join(','));
             parts.push([ '高峰時段查詢數', k.peakHourQueries || '-', '' ].map(esc).join(','));
             parts.push([ '每用戶平均查詢', k.avgQueriesPerUser || '-', '' ].map(esc).join(','));
@@ -1334,8 +1319,6 @@
             parts.push([ '平均回答正確率(%)', (k.kpiPending ? '計算中' : (k.avgAccuracyRate !== undefined ? k.avgAccuracyRate + '%' : '-')), 'AI分析' ].map(esc).join(','));
             parts.push([ '平均解決嘗試次數', (k.kpiPending ? '計算中' : (k.avgResolutionAttempts || '-')), '' ].map(esc).join(','));
             parts.push([ '未解決數量', (k.kpiPending ? '計算中' : (k.unresolvedQueries || '-')), '' ].map(esc).join(','));
-            parts.push([ '本週新用戶', k.newUsers || '-', '' ].map(esc).join(','));
-            parts.push([ '本週回訪用戶', k.returningUsers || '-', '' ].map(esc).join(','));
         }
 
         // 2) 每日統計
