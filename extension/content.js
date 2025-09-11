@@ -55,6 +55,98 @@
     // Storage key for panel position
     const PANEL_POS_KEY = 'ucduc_panel_pos';
 
+    // Wait for table DOM to update (mutation-based) to avoid blind timeouts
+    function waitForTableUpdate(timeoutMs = 10000) {
+        return new Promise((resolve) => {
+            try {
+                const tableBody = document.querySelector('.kernel-table-ui tbody');
+                if (!tableBody) return resolve();
+                let done = false;
+                const mo = new MutationObserver(() => {
+                    if (done) return;
+                    done = true;
+                    mo.disconnect();
+                    resolve();
+                });
+                mo.observe(tableBody, { childList: true, subtree: true, characterData: true });
+                setTimeout(() => {
+                    if (done) return;
+                    done = true;
+                    try { mo.disconnect(); } catch {}
+                    resolve();
+                }, timeoutMs);
+            } catch {
+                resolve();
+            }
+        });
+    }
+
+    // Single-flight range applier to avoid multiple submissions/reloads
+    let __rangeApplyLock = false;
+    let __rangeApplyPromise = null;
+    async function safeApplyRange(range) {
+        if (!range || !range.startDate || !range.endDate) return false;
+        if (__rangeApplyLock && __rangeApplyPromise) return __rangeApplyPromise;
+        __rangeApplyLock = true;
+        __rangeApplyPromise = (async () => {
+            try {
+                // If URL already has the desired range, do nothing
+                const cur = new URL(location.href);
+                const curStart = cur.searchParams.get('startDate');
+                const curEnd = cur.searchParams.get('endDate');
+                if (curStart === range.startDate && curEnd === range.endDate) return false;
+
+                // Update inputs if available
+                const startEl = document.querySelector('input[name="startDate"], #startDate');
+                const endEl = document.querySelector('input[name="endDate"], #endDate');
+                if (startEl && endEl) {
+                    if (startEl.value !== range.startDate) startEl.value = range.startDate;
+                    if (endEl.value !== range.endDate) endEl.value = range.endDate;
+                    const pageEl = document.querySelector('input[name="page"]');
+                    if (pageEl) pageEl.value = '0';
+                }
+
+                // Update address bar without reload
+                try {
+                    const newUrl = new URL(location.href);
+                    newUrl.searchParams.set('startDate', range.startDate);
+                    newUrl.searchParams.set('endDate', range.endDate);
+                    history.replaceState(history.state, '', newUrl.toString());
+                } catch {}
+
+                // If page exposes SPA refresh API, prefer it to avoid full reload
+                if (typeof window.__refreshData === 'function') {
+                    try {
+                        await window.__refreshData(range);
+                        return true;
+                    } catch {
+                        // fallback to click
+                    }
+                }
+
+                // Fallback: click query button once with disabled guard, and wait for DOM update
+                const queryBtn = document.getElementById('queryButton');
+                if (queryBtn) {
+                    if (queryBtn.disabled) return false;
+                    queryBtn.disabled = true;
+                    queryBtn.dataset.ucducPending = '1';
+                    try {
+                        queryBtn.click();
+                        await waitForTableUpdate(10000);
+                    } finally {
+                        delete queryBtn.dataset.ucducPending;
+                        queryBtn.disabled = false;
+                    }
+                    return true;
+                }
+                return false;
+            } finally {
+                __rangeApplyLock = false;
+            }
+        })();
+        return __rangeApplyPromise;
+    }
+
     // Apply a given range to page inputs and submit query if possible
     const applyRangeToPage = (range) => {
         if (!range || !range.startDate || !range.endDate) return false;
@@ -112,9 +204,9 @@
             return false; // no action needed
         }
 
-        // If inputs exist, set them and submit
-        const submitted = applyRangeToPage(useRange);
-        return submitted;
+    // Prefer safeApplyRange to avoid duplicate submissions and page reloads
+    const changed = await safeApplyRange(useRange);
+    return changed;
     };
 
     // Extract data rows from current page DOM (robust against missing data-* attributes)
@@ -712,7 +804,7 @@
 
         panel.querySelector('#ucduc-close')?.addEventListener('click', () => panel.remove());
         panel.querySelector('#ucduc-export')?.addEventListener('click', () => exportCSV());
-        panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
+    panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
         // Load stored custom range into inputs
         const loadCustomRangeToInputs = () => {
             try {
@@ -726,7 +818,7 @@
         loadCustomRangeToInputs();
 
         // Apply custom range: save to storage and trigger page query + rescan
-        panel.querySelector('#ucduc-apply-range')?.addEventListener('click', () => {
+    panel.querySelector('#ucduc-apply-range')?.addEventListener('click', async () => {
             const s = document.getElementById('ucduc-start-input').value;
             const e = document.getElementById('ucduc-end-input').value;
             if (!s || !e) {
@@ -739,18 +831,14 @@
                     console.debug('ucduc: saved custom range', payload);
                     // mirror into window for synchronous access by KPI calculator
                     try { window.__ucduc_custom_range = payload; } catch (e) {}
-                    // Apply to page and trigger scan if applied immediately
-                    const applied = applyRangeToPage(payload);
-                    if (!applied) {
-                        // If cannot apply (inputs not found), still trigger scanAllPages to use stored range
-                        scanAllPages();
-                    }
+            // Apply using safe path and re-scan after DOM updated
+            safeApplyRange(payload).then(() => scanAllPages());
                 });
             } catch (err) { console.warn('storage set failed', err); }
         });
 
         // Clear custom range from storage and reset inputs to current week defaults
-        panel.querySelector('#ucduc-clear-range')?.addEventListener('click', () => {
+    panel.querySelector('#ucduc-clear-range')?.addEventListener('click', async () => {
             try {
                 chrome.storage && chrome.storage.sync && chrome.storage.sync.remove([STORAGE_KEY], () => {
                     console.debug('ucduc: cleared custom range');
@@ -758,9 +846,8 @@
                     const { startDate, endDate } = getCurrentWeekRange();
                     document.getElementById('ucduc-start-input').value = startDate;
                     document.getElementById('ucduc-end-input').value = endDate;
-                    // Apply default week and rescan
-                    applyRangeToPage({ startDate, endDate });
-                    scanAllPages();
+            // Apply default week and rescan (safe)
+            safeApplyRange({ startDate, endDate }).then(() => scanAllPages());
                 });
             } catch (err) { console.warn('storage remove failed', err); }
         });
@@ -1410,11 +1497,34 @@
     };
 
     // Scan all pages by navigating pager links and fetching content
+    let __scanAbortController = null;
+    let __scanInFlight = null;
+    const __rangeCache = new Map(); // key `${start}|${end}|size`
     const scanAllPages = async () => {
+        // cancel previous scan if any
+        try { if (__scanAbortController) __scanAbortController.abort(); } catch {}
+        __scanAbortController = new AbortController();
+        const signal = __scanAbortController.signal;
+
         const table = document.querySelector('.kernel-table-ui');
         const container = table?.closest('.kernel-table-ui');
         const currentUrl = new URL(location.href);
         const size = currentUrl.searchParams.get('size') || '100';
+        const startParam = currentUrl.searchParams.get('startDate') || '';
+        const endParam = currentUrl.searchParams.get('endDate') || '';
+
+        const cacheKey = `${startParam}|${endParam}|${size}`;
+        if (__rangeCache.has(cacheKey)) {
+            const cached = __rangeCache.get(cacheKey);
+            if (cached && typeof cached.then === 'function') {
+                // share in-flight
+                return cached;
+            }
+            // reuse cached result
+            window.__ucduc_data = cached;
+            renderData(cached);
+            return cached;
+        }
 
         // Discover available pages from pager numbers; if only one, still process
         const pageLinks = Array.from(document.querySelectorAll('.ui-pager a[href*="/UserChat?"]'))
@@ -1443,40 +1553,42 @@
             byPage.set(currentUrl.searchParams.get('page') || '0', currentUrl.toString());
         }
 
-        // Fetch each page and parse with DOMParser.
-        const allRows = [];
-        for (const urlStr of byPage.values()) {
+        // Fetch each page and parse with DOMParser (in parallel)
+        const fetchOpts = { credentials: 'include', signal };
+        const pageUrls = Array.from(byPage.values());
+        const pageDocs = await Promise.all(pageUrls.map(async (urlStr) => {
             try {
-                const res = await fetch(urlStr, { credentials: 'include' });
+                const res = await fetch(urlStr, fetchOpts);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const html = await res.text();
-                const doc = new DOMParser().parseFromString(html, 'text/html');
-                const tbody = doc.querySelector('.kernel-table-ui tbody');
-                if (!tbody) continue;
-                // use the same robust extractor on the fetched document
-                const pageRows = extractRows(doc).filter(r => !EXCLUDED_USERS.has(r.userId));
-                console.debug('ucduc: fetched', urlStr, 'included rows', pageRows.length);
-                pageRows.forEach(r => allRows.push(r));
+                return new DOMParser().parseFromString(html, 'text/html');
             } catch (e) {
+                if (e.name === 'AbortError') return null;
                 console.warn('抓取頁面失敗', urlStr, e);
+                return null;
             }
-        }
+        }));
+
+        const allRows = [];
+        pageDocs.forEach((doc, idx) => {
+            if (!doc) return;
+            const tbody = doc.querySelector('.kernel-table-ui tbody');
+            if (!tbody) return;
+            const pageRows = extractRows(doc).filter(r => !EXCLUDED_USERS.has(r.userId));
+            console.debug('ucduc: fetched', pageUrls[idx], 'included rows', pageRows.length);
+            pageRows.forEach(r => allRows.push(r));
+        });
         console.debug('ucduc: total aggregated included rows from pages', allRows.length);
 
         // Get all rows (including excluded users) for KPI calculation
         const allRowsForKpi = [];
-        for (const urlStr of byPage.values()) {
-            try {
-                const res = await fetch(urlStr, { credentials: 'include' });
-                const html = await res.text();
-                const doc = new DOMParser().parseFromString(html, 'text/html');
-                const tbody = doc.querySelector('.kernel-table-ui tbody');
-                if (!tbody) continue;
-                const pageRows = extractRows(doc); // Don't filter for KPI
-                pageRows.forEach(r => allRowsForKpi.push(r));
-            } catch (e) {
-                console.warn('抓取頁面失敗', urlStr, e);
-            }
-        }
+        pageDocs.forEach((doc) => {
+            if (!doc) return;
+            const tbody = doc.querySelector('.kernel-table-ui tbody');
+            if (!tbody) return;
+            const pageRows = extractRows(doc);
+            pageRows.forEach(r => allRowsForKpi.push(r));
+        });
 
         const data = aggregateDailyUnique(allRows);
         const hourDist = computeHourDistribution(allRows);
@@ -1486,9 +1598,13 @@
         data.hourDist = hourDist;
         data.inclRawLog = inclRawLog;
         data.kpiSummary = kpiSummary;
-        window.__ucduc_data = data;
+    window.__ucduc_data = data;
     window.__ucduc_allRowsForKpi = allRowsForKpi; // 儲存供異步 LLM 更新 KPI
-        renderData(data);
+
+    // cache the resolved data for this range
+    __rangeCache.set(cacheKey, data);
+    renderData(data);
+    return data;
     };
 
     const exportPmTemplateCSV = () => {
@@ -1520,10 +1636,9 @@
             });
         } catch (e) { /* ignore */ }
 
-        // 1) Ensure this week range or custom range is applied; if not yet on URL, submit and let page reload
+        // 1) Ensure this week range or custom range is applied; safeApplyRange waits for DOM update
         try {
-            const submitted = await ensureWeekRangeAndQuery();
-            if (submitted) return; // navigation expected; skip further work now
+            await ensureWeekRangeAndQuery();
         } catch (e) {
             console.warn('ucduc: ensureWeekRangeAndQuery failed', e);
         }
