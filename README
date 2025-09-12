@@ -302,21 +302,35 @@
 
 ## 📐 KPI 精確計算公式
 
-> 以下為實際使用的公式；若 UI 與文件有差異，以本節為準。
+> 現況 vs 目標：本節同時標示「目前實作」與「規劃/文件目標」。若顯示 (尚未實作) 表示仍待程式調整；請參考 Roadmap。
 
-| 指標 | 公式 (概念) | 備註 |
-|------|-------------|------|
-| WAU | unique(週內 userId) | 去重後使用者數 |
-| 平均 DAU | Σ dailyUnique / 工作日數 | 週一至週五或自訂範圍 |
-| 總查詢數 raw | User+GPT 行數 | 僅內部參考，不做 KPI 分母 |
-| 總查詢數 user | User 問題筆數 | 問答對上限；多輪仍逐筆計 |
-| 評估問答對數 | Count(完成配對且送評估) | evaluatedPairs |
-| 加權解決率 | (Full + 0.5×Partial)/evaluatedPairs | Partial 權重 0.5 |
-| 平均正確率 | Σ accuracy / evaluatedPairs | accuracy ∈ [0,100]；缺失不列入 Σ |
-| 未解決數 | Count(status==否) | 以 pair 為單位 |
-| 平均嘗試次數 | Σ(解決問題輪次)/解決問題數 | 輪次估算模型仍在優化 |
-| 每用戶平均查詢 | userQueries / uniqueUsers | 使用深度指標 |
-| 峰值時段 | argmax(hourly.count) | 同時回傳 count |
+| 指標 | 目前實作公式 | 文件/目標公式 | 備註 |
+|------|---------------|----------------|------|
+| WAU | unique(週內 userId) | 同 | 去重後使用者數 |
+| 平均 DAU | Σ dailyUnique / 有資料的日數 | Σ dailyUnique / 工作日數 | 目前包含自訂範圍內任何有資料的日；未必只限週一~週五 |
+| 總查詢數 raw | (尚未實作計算) | User+GPT 行數 | 未納入 KPI；仍在規劃收集 GPT 行數分開統計 |
+| 總查詢數 user | user 問題筆數 (全部含未回/未審核) | 同 | 也是後續「評估分母」暫代用值 |
+| 評估問答對數 | user 問題筆數 (未區分是否完成 LLM 評估) | Count(完成配對且送評估) | 目前尚未排除「審核中 / 無 GPT 回答」案例 (提升精確度待實作) |
+| 解決率 | Full / user 問題筆數 | (Full + 0.5×Partial)/evaluatedPairs | 加權邏輯尚未實作；Partial 目前計 0；屬保守估計 |
+| 加權解決率 (目標) | — | (Full + 0.5×Partial)/evaluatedPairs | 計畫實作後替換「解決率」欄位顯示 |
+| 平均正確率 | Σ accuracy / user 問題筆數 | Σ accuracy / evaluatedPairs | 分母包含未取得分數者 → 數值偏保守；將來改為只含已完成評估 |
+| 未解決數 (現用) | user 問題筆數 - Full | Count(status==否) | 目前將 部分/未知/無回答 全部歸為未解決；後續可能拆成 strict/extended |
+| 未解決數 (strict 目標) | — | Count(status==否) | 規劃新增欄位或在 CSV 顯示 |
+| 平均嘗試次數 | user 問題筆數 / Full | Σ(解決問題輪次)/解決問題數 | 目前未做 thread 聚合；視多輪同題為多筆獨立問題 |
+| 每用戶平均查詢 | user 問題筆數 / WAU | 同 | — |
+| 峰值時段 | argmax(hourly.count) | 同 | 回傳對應 count |
+
+### 待改進重點 (Roadmap 摘要)
+1. 拆分 `evaluatedPairs` 與「全部 user 問題」分母
+2. 實作加權解決率 (Partial 0.5)
+3. 分離未解決 strict (僅否) 與 extended (否+部分+未知+無回答)
+4. 增補 raw (User+GPT) 雙計數以供對照
+5. Thread 聚合推估多輪嘗試次數
+
+### 參考
+- 內部治理與安全邊界：`INTERNAL_USE.md`
+- CSV 對應 JSON Schemas：`/schemas/*.schema.json`
+- 若將來指標邏輯實作與此表不符，請更新本節與 CHANGELOG。
 
 註：未成功配對或尚未評估之問答不計入 evaluatedPairs；解決率與正確率不受多餘 GPT 行數影響。
 
@@ -336,8 +350,8 @@
 | peak_hour | 峰值小時 (0-23) |
 | peak_hour_volume | 峰值查詢數 |
 | avg_query_per_user | 每用戶平均查詢 |
-| resolution_rate_weighted | 加權解決率 |
-| avg_accuracy | 平均正確率 |
+| resolution_rate_weighted | 加權解決率 (尚未實作，暫以現行 Full/user 問題替代視圖呈現) |
+| avg_accuracy | 平均正確率 (現行分母含未完成評估，為保守值) |
 | avg_attempts_to_solve | 平均解決嘗試輪次 |
 | unresolved_count | 未解決問答對數 |
 | new_users | 新用戶數 |
