@@ -944,6 +944,30 @@
         return panel;
     };
 
+    // Small floating reset viewport: 一個固定在左下角的小按鈕，
+    // 功能: 1) 一鍵重置主面板位置至預設 (右下) 2) 清除儲存的座標。
+    // 避免: 重複插入 (先檢查 id)
+    const ensureResetViewport = () => {
+        // Avoid duplicating
+        if (document.getElementById('ucduc-reset-viewport')) return;
+        const vp = document.createElement('div');
+        vp.id = 'ucduc-reset-viewport';
+        vp.title = '重置統計面板位置';
+        vp.textContent = '\u21BB'; // circular arrow symbol
+        vp.addEventListener('click', () => {
+            // If panel not exist create it
+            let panel = document.getElementById('ucduc-panel');
+            if (!panel) panel = ensurePanel();
+            // Reset to default bottom-right & remove stored position
+            panel.style.left = 'auto';
+            panel.style.top = 'auto';
+            panel.style.right = '16px';
+            panel.style.bottom = '16px';
+            try { chrome.storage && chrome.storage.sync && chrome.storage.sync.remove([PANEL_POS_KEY]); } catch (e) {}
+        });
+        document.body.appendChild(vp);
+    };
+
     const renderData = ({ daily, dailyByGpt, hourDist, inclRawLog, kpiSummary }) => {
         const tbody = document.querySelector('#ucduc-table tbody');
         const thead = document.querySelector('#ucduc-table thead tr');
@@ -1622,6 +1646,8 @@
     // Init when DOM ready
     const init = async () => {
         const panel = ensurePanel();
+        // Also ensure the tiny reset viewport exists (placed once per page)
+        ensureResetViewport();
         // Ensure panel inputs reflect stored custom range (if any)
         try {
             chrome.storage && chrome.storage.sync && chrome.storage.sync.get([STORAGE_KEY], (res) => {

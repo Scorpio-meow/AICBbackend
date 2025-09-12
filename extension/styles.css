@@ -424,3 +424,44 @@
 #ucduc-panel tr {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ========================================================================== */
+/* Reset Viewport (tiny floating button to restore panel position)            */
+/* ========================================================================== */
+#ucduc-reset-viewport {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  width: 40px;
+  height: 40px;
+  line-height: 40px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #ffffffcc;
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  cursor: pointer;
+  z-index: 99998;
+  box-shadow: 0 4px 14px rgba(59,130,246,0.35);
+  backdrop-filter: blur(4px);
+  transition: all 0.25s ease;
+  user-select: none;
+}
+
+#ucduc-reset-viewport:hover {
+  background: linear-gradient(135deg,#dbeafe,#bfdbfe);
+  color: #1e3a8a;
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 6px 18px rgba(59,130,246,0.45);
+}
+
+#ucduc-reset-viewport:active {
+  transform: translateY(-1px) scale(0.97);
+  background: linear-gradient(135deg,#bfdbfe,#93c5fd);
+}
+
+@media (max-width: 600px) {
+  #ucduc-reset-viewport { left: 8px; bottom: 8px; width: 36px; height: 36px; line-height: 36px; font-size:18px; }
+}
