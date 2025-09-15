@@ -1,4 +1,296 @@
 (() => {
+    // 🔐 Security: Content sanitization function to prevent XSS attacks
+    const sanitizeContent = (content) => {
+        if (typeof content !== 'string') return '';
+        // Remove HTML tags and potentially dangerous characters
+        return content
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;')
+            .replace(/\//g, '&#x2F;')
+            .replace(/\\/g, '&#x5C;')
+            .replace(/`/g, '&#x60;');
+    };
+
+    // 🔐 Security: Safe DOM element creation helper
+    const createSafeElement = (tagName, textContent = '', attributes = {}) => {
+        const element = document.createElement(tagName);
+        if (textContent) {
+            element.textContent = textContent; // Always use textContent for user data
+        }
+        Object.keys(attributes).forEach(key => {
+            if (key === 'textContent') {
+                element.textContent = attributes[key];
+            } else if (key === 'innerHTML') {
+                // Block innerHTML in attributes for security
+                console.warn('Security: innerHTML blocked, use textContent instead');
+            } else {
+                element.setAttribute(key, attributes[key]);
+            }
+        });
+        return element;
+    };
+
+    // 🔐 Security: Safe HTML structure builder (only for static trusted content)
+    // 🔐 Security: Create main panel body structure using safe DOM methods
+    const createPanelBodyStructure = () => {
+        const body = document.createElement('div');
+        body.className = 'ucduc-body';
+
+        // KPI Summary Section
+        const kpiSection = document.createElement('div');
+        kpiSection.id = 'ucduc-kpi-section';
+        kpiSection.style.display = 'block';
+
+        const kpiTitle = document.createElement('div');
+        kpiTitle.style.cssText = 'font-weight:600; margin:6px 0 8px; color:#0366d6;';
+        kpiTitle.textContent = '📊 摘要_KPI';
+
+        const kpiTableWrapper = document.createElement('div');
+        kpiTableWrapper.style.cssText = 'overflow:auto; margin-bottom:16px;';
+
+        const kpiTable = document.createElement('table');
+        kpiTable.id = 'ucduc-kpi-table';
+
+        const kpiThead = document.createElement('thead');
+        const kpiHeaderRow = document.createElement('tr');
+        const kpiHeaders = ['指標', '數值', '備註'];
+        const kpiWidths = ['200px', '100px', ''];
+        kpiHeaders.forEach((headerText, index) => {
+            const th = document.createElement('th');
+            th.textContent = headerText;
+            if (kpiWidths[index]) th.style.width = kpiWidths[index];
+            kpiHeaderRow.appendChild(th);
+        });
+        kpiThead.appendChild(kpiHeaderRow);
+
+        const kpiTbody = document.createElement('tbody');
+        const kpiRows = [
+            ['週起 (Week Start)', 'kpi-week-start', ''],
+            ['週終 (Week End)', 'kpi-week-end', ''],
+            ['日活平均 DAU (avg)', 'kpi-avg-dau', ''],
+            ['活躍用戶 AU (Active Users)', 'kpi-wau', ''],
+            ['查詢總數', 'kpi-total-queries', ''],
+            ['高峰時段 (時)', 'kpi-peak-hour', ''],
+            ['高峰時段查詢數', 'kpi-peak-hour-queries', ''],
+            ['每用戶平均查詢 (週)', 'kpi-avg-queries-per-user', ''],
+            ['解決率 (%)', 'kpi-resolution-rate', 'AI分析'],
+            ['平均回答正確率 (%)', 'kpi-avg-accuracy', 'AI分析'],
+            ['平均解決嘗試次數', 'kpi-avg-attempts', ''],
+            ['未解決數量', 'kpi-unresolved', '否+部分']
+        ];
+        kpiRows.forEach(([label, id, note]) => {
+            const tr = document.createElement('tr');
+            const tdLabel = document.createElement('td');
+            tdLabel.textContent = label;
+            const tdValue = document.createElement('td');
+            tdValue.id = id;
+            tdValue.textContent = '-';
+            const tdNote = document.createElement('td');
+            tdNote.textContent = note;
+            tr.appendChild(tdLabel);
+            tr.appendChild(tdValue);
+            tr.appendChild(tdNote);
+            kpiTbody.appendChild(tr);
+        });
+
+        kpiTable.appendChild(kpiThead);
+        kpiTable.appendChild(kpiTbody);
+        kpiTableWrapper.appendChild(kpiTable);
+        kpiSection.appendChild(kpiTitle);
+        kpiSection.appendChild(kpiTableWrapper);
+
+        // Daily Users Section
+        const dailySection = document.createElement('div');
+        dailySection.id = 'ucduc-daily-section';
+        dailySection.style.display = 'none';
+
+        const dailyTitle = document.createElement('div');
+        dailyTitle.style.cssText = 'font-weight:600; margin:6px 0 8px; color:#0366d6;';
+        dailyTitle.textContent = '📅 每日使用人次';
+
+        const dailySummary = document.createElement('div');
+        dailySummary.id = 'ucduc-summary';
+        dailySummary.textContent = '掃描中或等待資料…';
+
+        const dailyTableWrapper = document.createElement('div');
+        dailyTableWrapper.style.cssText = 'overflow:auto; margin-bottom:8px;';
+
+        const dailyTable = document.createElement('table');
+        dailyTable.id = 'ucduc-table';
+        const dailyThead = document.createElement('thead');
+        const dailyHeaderRow = document.createElement('tr');
+        ['日期', '唯一人次'].forEach(headerText => {
+            const th = document.createElement('th');
+            th.textContent = headerText;
+            dailyHeaderRow.appendChild(th);
+        });
+        dailyThead.appendChild(dailyHeaderRow);
+        const dailyTbody = document.createElement('tbody');
+        dailyTable.appendChild(dailyThead);
+        dailyTable.appendChild(dailyTbody);
+        dailyTableWrapper.appendChild(dailyTable);
+
+        dailySection.appendChild(dailyTitle);
+        dailySection.appendChild(dailySummary);
+        dailySection.appendChild(dailyTableWrapper);
+
+        // Hour Distribution Section
+        const hourSection = document.createElement('div');
+        hourSection.id = 'ucduc-hour-section';
+        hourSection.style.display = 'none';
+
+        const hourTitle = document.createElement('div');
+        hourTitle.style.cssText = 'font-weight:600; margin:6px 0 8px; color:#0366d6;';
+        hourTitle.textContent = '⏰ 時段分布 (0-23小時)';
+
+        const hourTableWrapper = document.createElement('div');
+        hourTableWrapper.style.cssText = 'overflow:auto; margin-bottom:8px;';
+
+        const hourTable = document.createElement('table');
+        hourTable.id = 'ucduc-hour-table';
+        const hourThead = document.createElement('thead');
+        const hourHeaderRow = document.createElement('tr');
+        hourThead.appendChild(hourHeaderRow);
+        const hourTbody = document.createElement('tbody');
+        hourTable.appendChild(hourThead);
+        hourTable.appendChild(hourTbody);
+        hourTableWrapper.appendChild(hourTable);
+
+        hourSection.appendChild(hourTitle);
+        hourSection.appendChild(hourTableWrapper);
+
+        // Detailed Log Section
+        const logSection = document.createElement('div');
+        logSection.id = 'ucduc-log-section';
+        logSection.style.display = 'none';
+
+        const logTitle = document.createElement('div');
+        logTitle.style.cssText = 'font-weight:600; margin:6px 0 8px; color:#0366d6;';
+        logTitle.textContent = '📋 詳細 log（統計名單）';
+
+        const logTableWrapper = document.createElement('div');
+        logTableWrapper.style.cssText = 'overflow:auto; margin-bottom:8px; max-height:400px;';
+
+        const logTable = document.createElement('table');
+        logTable.id = 'ucduc-incl-log-table';
+        const logThead = document.createElement('thead');
+        const logHeaderRow = document.createElement('tr');
+        ['用戶', '問題內容', 'GPT回答', '解決狀態', '正確率', '時間'].forEach(headerText => {
+            const th = document.createElement('th');
+            th.textContent = headerText;
+            logHeaderRow.appendChild(th);
+        });
+        logThead.appendChild(logHeaderRow);
+        const logTbody = document.createElement('tbody');
+        logTable.appendChild(logThead);
+        logTable.appendChild(logTbody);
+        logTableWrapper.appendChild(logTable);
+
+        logSection.appendChild(logTitle);
+        logSection.appendChild(logTableWrapper);
+
+        // Append all sections to body
+        body.appendChild(kpiSection);
+        body.appendChild(dailySection);
+        body.appendChild(hourSection);
+        body.appendChild(logSection);
+
+        return body;
+    };
+
+    const createPanelStructure = () => {
+        const panel = document.createElement('div');
+        panel.id = 'ucduc-panel';
+        
+        // Header section
+        const header = document.createElement('div');
+        header.className = 'ucduc-header';
+        
+        const title = document.createElement('strong');
+        title.textContent = '每日使用人次';
+        
+        const actions = document.createElement('div');
+        actions.className = 'ucduc-actions';
+        
+        // Create buttons safely
+        const buttons = [
+            { id: 'ucduc-toggle-kpi', text: '隱藏KPI', 'data-active': 'true' },
+            { id: 'ucduc-toggle-daily', text: '每日統計' },
+            { id: 'ucduc-toggle-hour', text: '時段分析' },
+            { id: 'ucduc-toggle-log', text: '詳細log' }
+        ];
+        
+        buttons.forEach(btn => {
+            const button = document.createElement('button');
+            button.id = btn.id;
+            button.textContent = btn.text;
+            if (btn['data-active']) button.setAttribute('data-active', btn['data-active']);
+            actions.appendChild(button);
+        });
+        
+        // Date inputs
+        const startLabel = document.createElement('label');
+        startLabel.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;';
+        // 🔐 Security: Use safe DOM creation instead of innerHTML
+        const startText = document.createTextNode('起');
+        const startBr = document.createElement('br');
+        const startInput = document.createElement('input');
+        startInput.id = 'ucduc-start-input';
+        startInput.type = 'date';
+        startInput.style.cssText = 'padding:2px 4px;';
+        startLabel.appendChild(startText);
+        startLabel.appendChild(startBr);
+        startLabel.appendChild(startInput);
+        
+        const endLabel = document.createElement('label');
+        endLabel.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;';
+        // 🔐 Security: Use safe DOM creation instead of innerHTML
+        const endText = document.createTextNode('迄');
+        const endBr = document.createElement('br');
+        const endInput = document.createElement('input');
+        endInput.id = 'ucduc-end-input';
+        endInput.type = 'date';
+        endInput.style.cssText = 'padding:2px 4px;';
+        endLabel.appendChild(endText);
+        endLabel.appendChild(endBr);
+        endLabel.appendChild(endInput);
+        
+        // Action buttons
+        const applyBtn = document.createElement('button');
+        applyBtn.id = 'ucduc-apply-range';
+        applyBtn.textContent = '套用';
+        applyBtn.title = '套用自訂範圍';
+        
+        const clearBtn = document.createElement('button');
+        clearBtn.id = 'ucduc-clear-range';
+        clearBtn.textContent = '清除';
+        clearBtn.title = '清除自訂範圍';
+        
+        const scanBtn = document.createElement('button');
+        scanBtn.id = 'ucduc-scan';
+        scanBtn.textContent = '聚合全頁';
+        
+        const exportBtn = document.createElement('button');
+        exportBtn.id = 'ucduc-export';
+        exportBtn.textContent = '匯出CSV';
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.id = 'ucduc-close';
+        closeBtn.textContent = '×';
+        
+        actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, closeBtn);
+        header.append(title, actions);
+        
+        // Body section with table structure
+        // 🔐 Security: Use safe DOM creation instead of innerHTML
+        const body = createPanelBodyStructure();
+        
+        panel.append(header, body);
+        return panel;
+    };
+
     // Excluded accounts (not counted in main stats), but logged separately
     const EXCLUDED_USERS = new Set([
         // 實習生
@@ -606,90 +898,9 @@
     const ensurePanel = () => {
         let panel = document.getElementById('ucduc-panel');
         if (panel) return panel;
-        panel = document.createElement('div');
-    panel.id = 'ucduc-panel';
-                panel.innerHTML = `
-      <div class="ucduc-header">
-        <strong>每日使用人次</strong>
-        <div class="ucduc-actions">
-          <button id="ucduc-toggle-kpi" data-active="true">隱藏KPI</button>
-          <button id="ucduc-toggle-daily">每日統計</button>
-          <button id="ucduc-toggle-hour">時段分析</button>
-          <button id="ucduc-toggle-log">詳細log</button>
-                    <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;">起<br><input id="ucduc-start-input" type="date" style="padding:2px 4px;" /></label>
-                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;">迄<br><input id="ucduc-end-input" type="date" style="padding:2px 4px;" /></label>
-                    <button id="ucduc-apply-range" title="套用自訂範圍">套用</button>
-                    <button id="ucduc-clear-range" title="清除自訂範圍">清除</button>
-          <button id="ucduc-scan">聚合全頁</button>
-          <button id="ucduc-export">匯出CSV</button>
-          <button id="ucduc-close">×</button>
-        </div>
-      </div>
-            <div class="ucduc-body">
-                <!-- KPI Summary Section -->
-                <div id="ucduc-kpi-section" style="display:block;">
-                    <div style="font-weight:600; margin:6px 0 8px; color:#0366d6;">📊 摘要_KPI</div>
-                    <div style="overflow:auto; margin-bottom:16px;">
-                        <table id="ucduc-kpi-table">
-                            <thead>
-                                <tr><th style="width:200px;">指標</th><th style="width:100px;">數值</th><th>備註</th></tr>
-                            </thead>
-                            <tbody>
-                                <tr><td>週起 (Week Start)</td><td id="kpi-week-start">-</td><td></td></tr>
-                                <tr><td>週終 (Week End)</td><td id="kpi-week-end">-</td><td></td></tr>
-                                <tr><td>日活平均 DAU (avg)</td><td id="kpi-avg-dau">-</td><td></td></tr>
-                                <tr><td>活躍用戶 AU (Active Users)</td><td id="kpi-wau">-</td><td></td></tr>
-                                <tr><td>查詢總數</td><td id="kpi-total-queries">-</td><td></td></tr>
-                                <tr><td>高峰時段 (時)</td><td id="kpi-peak-hour">-</td><td></td></tr>
-                                <tr><td>高峰時段查詢數</td><td id="kpi-peak-hour-queries">-</td><td></td></tr>
-                                <tr><td>每用戶平均查詢 (週)</td><td id="kpi-avg-queries-per-user">-</td><td></td></tr>
-                                <tr><td>解決率 (%)</td><td id="kpi-resolution-rate">-</td><td>AI分析</td></tr>
-                                <tr><td>平均回答正確率 (%)</td><td id="kpi-avg-accuracy">-</td><td>AI分析</td></tr>
-                                <tr><td>平均解決嘗試次數</td><td id="kpi-avg-attempts">-</td><td></td></tr>
-                                <tr><td>未解決數量</td><td id="kpi-unresolved">-</td><td>否+部分</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Daily Users Section -->
-                <div id="ucduc-daily-section" style="display:none;">
-                    <div style="font-weight:600; margin:6px 0 8px; color:#0366d6;">📅 每日使用人次</div>
-                    <div id="ucduc-summary">掃描中或等待資料…</div>
-                    <div style="overflow:auto; margin-bottom:8px;">
-                        <table id="ucduc-table"><thead><tr><th>日期</th><th>唯一人次</th></tr></thead><tbody></tbody></table>
-                    </div>
-                </div>
-
-                <!-- Hour Distribution Section -->
-                <div id="ucduc-hour-section" style="display:none;">
-                    <div style="font-weight:600; margin:6px 0 8px; color:#0366d6;">⏰ 使用時段_分佈</div>
-                    <div style="overflow:auto">
-                        <table id="ucduc-hour-table"><thead><tr><th>時段 (0-23)</th><th>查詢數</th></tr></thead><tbody></tbody></table>
-                    </div>
-                </div>
-
-                <!-- Usage Log Section -->
-                <div id="ucduc-log-section" style="display:none;">
-                    <div style="font-weight:600; margin:6px 0 8px; color:#0366d6;">📋 每日使用log</div>
-                    <div style="overflow:auto; max-height:300px;">
-                        <table id="ucduc-incl-log-table">
-                            <thead>
-                                <tr>
-                                    <th>UserId</th>
-                                    <th>用戶問題</th>
-                                    <th>GPT回答</th>
-                                    <th>是否得到解決</th>
-                                    <th>回答正確率</th>
-                                    <th>對話時間</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-    `;
+        
+        // 🔐 Security: Use safe DOM creation instead of innerHTML
+        panel = createPanelStructure();
         document.body.appendChild(panel);
 
         // Initialize panel position from storage (if any)
@@ -981,15 +1192,20 @@
         });
         const gptList = Array.from(gptSet).sort();
 
-        // rebuild header
-        thead.innerHTML = '';
+        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
+        while (thead.firstChild) {
+            thead.removeChild(thead.firstChild);
+        }
         const headRow = document.createElement('tr');
         headRow.appendChild(Object.assign(document.createElement('th'), { textContent: '日期' }));
         headRow.appendChild(Object.assign(document.createElement('th'), { textContent: '唯一人次' }));
         gptList.forEach(g => headRow.appendChild(Object.assign(document.createElement('th'), { textContent: g })));
         thead.appendChild(headRow);
 
-        tbody.innerHTML = '';
+        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
+        while (tbody.firstChild) {
+            tbody.removeChild(tbody.firstChild);
+        }
         let total = 0;
         daily.forEach(({ day, uniqueUsers }) => {
             total += uniqueUsers;
@@ -1025,8 +1241,10 @@
         const hourTotals = (hourDist && hourDist.hourTotals) ? hourDist.hourTotals : Array.from({ length: 24 }, () => 0);
         const hourByUser = (hourDist && hourDist.hourByUser) ? hourDist.hourByUser : {};
 
-        // header: 時段, 查詢數, <實際帳號1>, <實際帳號2>, ...
-        theadRow.innerHTML = '';
+        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
+        while (theadRow.firstChild) {
+            theadRow.removeChild(theadRow.firstChild);
+        }
         theadRow.appendChild(Object.assign(document.createElement('th'), { textContent: '時段 (0-23)' }));
         theadRow.appendChild(Object.assign(document.createElement('th'), { textContent: '查詢數' }));
         userList.forEach((uid) => {
@@ -1036,8 +1254,10 @@
             theadRow.appendChild(th);
         });
 
-        // body rows for 0..23
-        tbody.innerHTML = '';
+        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
+        while (tbody.firstChild) {
+            tbody.removeChild(tbody.firstChild);
+        }
         for (let h = 0; h < 24; h++) {
             const tr = document.createElement('tr');
             tr.appendChild(Object.assign(document.createElement('td'), { textContent: String(h) }));
@@ -1257,7 +1477,10 @@
         if (!table) return;
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
-        tbody.innerHTML = '';
+        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
+        while (tbody.firstChild) {
+            tbody.removeChild(tbody.firstChild);
+        }
         (logs || []).forEach((r) => {
             const tr = document.createElement('tr');
             
