@@ -276,11 +276,16 @@
         exportBtn.id = 'ucduc-export';
         exportBtn.textContent = '匯出CSV';
         
+        const aiReviewBtn = document.createElement('button');
+        aiReviewBtn.id = 'ucduc-ai-review';
+        aiReviewBtn.textContent = '開始AI審核';
+        aiReviewBtn.title = '手動觸發所有問答對的AI品質評估';
+        
         const closeBtn = document.createElement('button');
         closeBtn.id = 'ucduc-close';
         closeBtn.textContent = '×';
         
-        actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, closeBtn);
+        actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, aiReviewBtn, closeBtn);
         header.append(title, actions);
         
         // Body section with table structure
@@ -658,8 +663,18 @@
             };
 
             if (pair.gptResponse && pair.gptResponse.content) {
-                pushed.resolved = 'AI審核中';
-                pushed.accuracy = '審核中';
+                // Check if already assessed
+                const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
+                const cached = __llmCache.get(key);
+                const hasValidCache = cached && typeof cached.then !== 'function' && cached.resolved;
+                
+                if (hasValidCache) {
+                    pushed.resolved = cached.resolved;
+                    pushed.accuracy = cached.accuracy;
+                } else {
+                    pushed.resolved = '待AI審核';
+                    pushed.accuracy = '待審核';
+                }
             }
 
             out.push(pushed);
@@ -1015,7 +1030,8 @@
 
         panel.querySelector('#ucduc-close')?.addEventListener('click', () => panel.remove());
         panel.querySelector('#ucduc-export')?.addEventListener('click', () => exportCSV());
-    panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
+        panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
+        panel.querySelector('#ucduc-ai-review')?.addEventListener('click', () => startAiReview());
         // Load stored custom range into inputs
         const loadCustomRangeToInputs = () => {
             try {
@@ -1435,36 +1451,23 @@
                 time: formatYMDHMS(dt)
             };
 
-            // If GPT responded, display 'AI審核中' to indicate background LLM will assess
+            // If GPT responded, display '待AI審核' to indicate manual AI review is needed
             if (pair.gptResponse && pair.gptResponse.content) {
-                pushed.resolved = 'AI審核中';
-                pushed.accuracy = '審核中';
+                // Check if already assessed
+                const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
+                const cached = __llmCache.get(key);
+                const hasValidCache = cached && typeof cached.then !== 'function' && cached.resolved;
+                
+                if (hasValidCache) {
+                    pushed.resolved = cached.resolved;
+                    pushed.accuracy = cached.accuracy;
+                } else {
+                    pushed.resolved = '待AI審核';
+                    pushed.accuracy = '待審核';
+                }
             }
 
             out.push(pushed);
-
-            // 異步升級為 LLM 評估（只發起一次，避免重複請求）
-            if (pair.gptResponse && pair.gptResponse.content) {
-                requestLlmAssessment(pair.userQuestion.content || '', pair.gptResponse.content || '').then(r => {
-                    if (r && r.resolved) {
-                        const target = out.find(o => o.time === formatYMDHMS(dt) && o.userId === pair.userQuestion.userId);
-                        if (target) {
-                            target.resolved = r.resolved;
-                            target.accuracy = r.accuracy;
-                            // 局部更新: 直接重新渲染整個 log 表 (資料量可接受)
-                            if (window.__ucduc_data) {
-                                window.__ucduc_data.inclRawLog = out;
-                                renderIncludedRawLogTable(out);
-                                // KPI 重新計算 (使用最新評估)
-                                const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
-                                const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
-                                window.__ucduc_data.kpiSummary = kpi;
-                                renderKpiSummary(kpi);
-                            }
-                        }
-                    }
-                });
-            }
         });
         
         out.sort((a, b) => a.time.localeCompare(b.time));
@@ -1513,18 +1516,28 @@
             } else if (r.resolved === '部分') {
                 tdResolved.style.color = '#bf8700';
                 tdResolved.style.background = '#fffbeb';
+            } else if (r.resolved === '待AI審核') {
+                tdResolved.style.color = '#8b5cf6';
+                tdResolved.style.background = '#f3e8ff';
+                tdResolved.style.fontWeight = '500';
             }
             
             const tdAcc = document.createElement('td');
             tdAcc.textContent = r.accuracy || '';
             // Add color coding for accuracy
-            const accuracyNum = parseFloat((r.accuracy || '0%').replace('%', ''));
-            if (accuracyNum >= 80) {
-                tdAcc.style.color = '#2da44e';
-            } else if (accuracyNum >= 60) {
-                tdAcc.style.color = '#bf8700';
+            if (r.accuracy === '待審核') {
+                tdAcc.style.color = '#8b5cf6';
+                tdAcc.style.background = '#f3e8ff';
+                tdAcc.style.fontWeight = '500';
             } else {
-                tdAcc.style.color = '#cf222e';
+                const accuracyNum = parseFloat((r.accuracy || '0%').replace('%', ''));
+                if (accuracyNum >= 80) {
+                    tdAcc.style.color = '#2da44e';
+                } else if (accuracyNum >= 60) {
+                    tdAcc.style.color = '#bf8700';
+                } else {
+                    tdAcc.style.color = '#cf222e';
+                }
             }
             
             const tdTime = document.createElement('td');
@@ -1621,6 +1634,82 @@
 
     
 
+
+    // Manual AI review trigger function
+    const startAiReview = async () => {
+        const data = window.__ucduc_data;
+        if (!data || !data.inclRawLog) {
+            alert('請先掃描資料（點擊「聚合全頁」按鈕）');
+            return;
+        }
+
+        const aiBtn = document.getElementById('ucduc-ai-review');
+        if (!aiBtn) return;
+
+        // Find all question-answer pairs that need AI assessment
+        const allRows = window.__ucduc_allRowsForKpi || [];
+        const userGptPairs = groupUserGptPairs(allRows.filter(r => !EXCLUDED_USERS.has(r.userId)));
+        
+        // Count pairs that have GPT responses but no cached assessment
+        let pendingPairs = 0;
+        const assessmentPromises = [];
+        
+        userGptPairs.forEach(pair => {
+            if (pair.gptResponse && pair.gptResponse.content && pair.userQuestion && pair.userQuestion.content) {
+                const key = hashKey(pair.userQuestion.content, pair.gptResponse.content);
+                
+                // Check if we already have a finalized assessment (not a Promise)
+                const cached = __llmCache.get(key);
+                const hasValidCache = cached && typeof cached.then !== 'function' && cached.resolved;
+                
+                if (!hasValidCache) {
+                    pendingPairs++;
+                    const promise = requestLlmAssessment(pair.userQuestion.content, pair.gptResponse.content);
+                    assessmentPromises.push(promise);
+                }
+            }
+        });
+
+        if (pendingPairs === 0) {
+            alert('所有問答對都已完成AI評估！');
+            return;
+        }
+
+        // Update button state
+        aiBtn.textContent = `AI審核中 (${pendingPairs}項)`;
+        aiBtn.disabled = true;
+
+        try {
+            // Wait for all assessments to complete
+            console.log(`開始AI審核 - 待評估項目: ${pendingPairs}個`);
+            const results = await Promise.all(assessmentPromises);
+            
+            console.log(`AI審核完成 - 成功評估: ${results.filter(r => r && r.ok).length}個`);
+
+            // Refresh data and UI
+            if (window.__ucduc_data && window.__ucduc_allRowsForKpi) {
+                const newInclRawLog = buildIncludedRawLog(window.__ucduc_allRowsForKpi.filter(r => !EXCLUDED_USERS.has(r.userId)));
+                window.__ucduc_data.inclRawLog = newInclRawLog;
+                renderIncludedRawLogTable(newInclRawLog);
+
+                // Recalculate KPI with updated assessments
+                const storedRange = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+                const newKpi = calculateKpiSummary(window.__ucduc_allRowsForKpi, storedRange);
+                window.__ucduc_data.kpiSummary = newKpi;
+                renderKpiSummary(newKpi);
+            }
+
+            alert(`AI審核完成！\n評估項目: ${pendingPairs}個\n成功評估: ${results.filter(r => r && r.ok).length}個`);
+
+        } catch (error) {
+            console.error('AI審核過程發生錯誤:', error);
+            alert('AI審核過程發生錯誤，請檢查網路連線或稍後再試');
+        } finally {
+            // Restore button state
+            aiBtn.textContent = '開始AI審核';
+            aiBtn.disabled = false;
+        }
+    };
 
     // CSV export (exactly 4 tables: KPI摘要, 每日統計, 時段分析, 詳細log)
     const exportCSV = () => {

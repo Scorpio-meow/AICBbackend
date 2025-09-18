@@ -4,7 +4,7 @@
 // { type: 'llmAssess', question: string, answer: string, model?: string }
 // 回覆: { ok: true, resolved: '是'|'否'|'部分'|'未知', accuracy: '0-100%', raw?: any } 或 { ok:false, error }
 
-const DEFAULT_MODEL = 'gpt-oss:20b';
+const DEFAULT_MODEL = 'deepseek-r1:14b';
 const ENDPOINT = 'https://blowfish-absolute-absolutely.ngrok-free.app/api/generate';
 
 async function callLLM(question, answer, model = DEFAULT_MODEL) {
