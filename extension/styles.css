@@ -178,39 +178,6 @@
   border-color: #0284c7;
 }
 
-/* AI審核按鈕 */
-#ucduc-panel .ucduc-actions button#ucduc-ai-review {
-  background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
-  border-color: #8b5cf6;
-  color: #581c87;
-  font-weight: 600;
-  position: relative;
-}
-
-#ucduc-panel .ucduc-actions button#ucduc-ai-review:hover {
-  background: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%);
-  border-color: #7c3aed;
-  color: #4c1d95;
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
-}
-
-#ucduc-panel .ucduc-actions button#ucduc-ai-review:disabled {
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-  border-color: #cbd5e1;
-  color: #64748b;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-#ucduc-panel .ucduc-actions button#ucduc-ai-review:disabled:hover {
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-  border-color: #cbd5e1;
-  color: #64748b;
-  transform: none;
-  box-shadow: none;
-}
-
 /* 關閉按鈕 */
 #ucduc-panel .ucduc-actions button#ucduc-close {
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
