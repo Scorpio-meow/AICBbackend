@@ -276,11 +276,17 @@
         exportBtn.id = 'ucduc-export';
         exportBtn.textContent = '匯出CSV';
         
+        const aiReviewBtn = document.createElement('button');
+        aiReviewBtn.id = 'ucduc-ai-review';
+        aiReviewBtn.textContent = '開始AI審核';
+        aiReviewBtn.title = '點擊開始AI品質評估';
+        aiReviewBtn.style.cssText = 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;';
+        
         const closeBtn = document.createElement('button');
         closeBtn.id = 'ucduc-close';
         closeBtn.textContent = '×';
         
-        actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, closeBtn);
+        actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, aiReviewBtn, closeBtn);
         header.append(title, actions);
         
         // Body section with table structure
@@ -386,7 +392,13 @@
                 const cur = new URL(location.href);
                 const curStart = cur.searchParams.get('startDate');
                 const curEnd = cur.searchParams.get('endDate');
-                if (curStart === range.startDate && curEnd === range.endDate) return false;
+                const curSize = cur.searchParams.get('size');
+                
+                // Check if we need to update range or size
+                const needsRangeUpdate = curStart !== range.startDate || curEnd !== range.endDate;
+                const needsSizeUpdate = curSize !== '100';
+                
+                if (!needsRangeUpdate && !needsSizeUpdate) return false;
 
                 // Update inputs if available
                 const startEl = document.querySelector('input[name="startDate"], #startDate');
@@ -396,6 +408,13 @@
                     if (endEl.value !== range.endDate) endEl.value = range.endDate;
                     const pageEl = document.querySelector('input[name="page"]');
                     if (pageEl) pageEl.value = '0';
+                    
+                    // Ensure size is set to 100
+                    const sizeEl = document.querySelector('input[name="size"], select[name="size"]');
+                    if (sizeEl && sizeEl.value !== '100') {
+                        sizeEl.value = '100';
+                        console.debug('ucduc: 設定頁面大小為 100');
+                    }
                 }
 
                 // Update address bar without reload
@@ -403,6 +422,7 @@
                     const newUrl = new URL(location.href);
                     newUrl.searchParams.set('startDate', range.startDate);
                     newUrl.searchParams.set('endDate', range.endDate);
+                    newUrl.searchParams.set('size', '100'); // Ensure size=100
                     history.replaceState(history.state, '', newUrl.toString());
                 } catch {}
 
@@ -410,6 +430,8 @@
                 if (typeof window.__refreshData === 'function') {
                     try {
                         await window.__refreshData(range);
+                        // Re-apply size=100 after SPA refresh
+                        setTimeout(() => setPagerSizeTo100(), 200);
                         return true;
                     } catch {
                         // fallback to click
@@ -427,6 +449,9 @@
                     queryBtn.click();
                     await waitForTableUpdate(10000);
                     delete queryBtn.dataset.ucducPending;
+                    
+                    // Re-apply size=100 after button click
+                    setTimeout(() => setPagerSizeTo100(), 300);
                     return true;
                 }
                 return false;
@@ -488,15 +513,19 @@
         const url = new URL(location.href);
         const urlStart = url.searchParams.get('startDate');
         const urlEnd = url.searchParams.get('endDate');
+        const urlSize = url.searchParams.get('size');
 
-        // If URL already has the desired range, don't submit again
-        if (urlStart === useRange.startDate && urlEnd === useRange.endDate) {
+        // If URL already has the desired range and size=100, don't submit again
+        if (urlStart === useRange.startDate && urlEnd === useRange.endDate && urlSize === '100') {
             return false; // no action needed
         }
 
-    // Prefer safeApplyRange to avoid duplicate submissions and page reloads
-    const changed = await safeApplyRange(useRange);
-    return changed;
+        // Ensure size is set to 100 in the range we apply
+        const rangeWithSize = { ...useRange, size: '100' };
+
+        // Prefer safeApplyRange to avoid duplicate submissions and page reloads
+        const changed = await safeApplyRange(rangeWithSize);
+        return changed;
     };
 
     // Extract data rows from current page DOM (robust against missing data-* attributes)
@@ -656,8 +685,8 @@
             };
 
             if (pair.gptResponse && pair.gptResponse.content) {
-                pushed.resolved = 'AI審核中';
-                pushed.accuracy = '審核中';
+                pushed.resolved = '待審核';
+                pushed.accuracy = '待審核';
             }
 
             out.push(pushed);
@@ -711,7 +740,7 @@
         let resolvedCount = 0;
         let totalAccuracyScore = 0;
         let resolutionAttempts = 0;
-    let kpiPending = false; // true if any pair still waiting for LLM result
+        // Removed kpiPending logic - now shows results based on current state
 
         // Process all historical data to identify new vs returning users
         const allHistoricalUsers = new Set();
@@ -733,23 +762,6 @@
         // Process current week data with GPT response analysis
         const userGptPairs = groupUserGptPairs(allWeekRows);
 
-        // Quick pre-check: if any pair has a GPT response but no finalized LLM cache result,
-        // mark KPI as pending so UI shows '計算中'. This covers cases where local fallback
-        // assessment returned neutral 0% and we still want to indicate async LLM is pending.
-        try {
-            for (const pair of userGptPairs) {
-                if (pair.gptResponse && pair.gptResponse.content) {
-                    const key = hashKey(pair.userQuestion?.content || '', pair.gptResponse.content || '');
-                    if (!__llmCache.has(key) || (typeof __llmCache.get(key) === 'object' && typeof __llmCache.get(key).then === 'function')) {
-                        kpiPending = true;
-                        break;
-                    }
-                }
-            }
-        } catch (e) {
-            // on any error, conservatively mark pending
-            kpiPending = true;
-        }
         console.debug('ucduc: KPI calculation - userGptPairs count:', userGptPairs.length);
         
         userGptPairs.forEach(pair => {
@@ -757,7 +769,7 @@
             const hour = toHour(pair.userQuestion.time);
             let assessment = { resolved: '未知', accuracy: '0%' };
 
-            // If GPT responded, check if LLM cache has a finalized result; if not, mark KPI as pending
+            // If GPT responded, use cached result if available, otherwise use fallback assessment
             if (pair.gptResponse && pair.gptResponse.content) {
                 try {
                     const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
@@ -768,25 +780,21 @@
                         if (isFinal) {
                             assessment = { resolved: cached.resolved, accuracy: cached.accuracy };
                         } else {
-                            // fallback to local assessment but mark pending
+                            // Use fallback assessment for pending reviews
                             assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
-                            kpiPending = true;
                         }
                     } else {
                         assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
-                        kpiPending = true;
                     }
                     console.debug('ucduc: GPT response assessment (pair):', {
                         user: pair.userQuestion.userId,
                         question: pair.userQuestion.content,
                         resolved: assessment.resolved,
                         accuracy: assessment.accuracy,
-                        hasGptResponse: !!pair.gptResponse,
-                        kpiPending
+                        hasGptResponse: !!pair.gptResponse
                     });
                 } catch (e) {
                     assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
-                    kpiPending = true;
                 }
             } else {
                 console.debug('ucduc: No GPT response found for user:', pair.userQuestion.userId);
@@ -888,8 +896,7 @@
             resolutionRate: resolutionRate,
             avgAccuracyRate: avgAccuracyRate,
             avgResolutionAttempts: avgResolutionAttempts,
-            unresolvedQueries: unresolvedQueries,
-            kpiPending: kpiPending,
+            unresolvedQueries: unresolvedQueries
         };
     };
     // Render floating panel
@@ -1013,7 +1020,43 @@
 
         panel.querySelector('#ucduc-close')?.addEventListener('click', () => panel.remove());
         panel.querySelector('#ucduc-export')?.addEventListener('click', () => exportCSV());
-    panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
+        panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
+        
+        // AI 審核按鈕事件
+        panel.querySelector('#ucduc-ai-review')?.addEventListener('click', async () => {
+            const btn = panel.querySelector('#ucduc-ai-review');
+            if (!btn) return;
+            
+            // 檢查是否有資料可以審核
+            if (!window.__ucduc_data || !window.__ucduc_data.inclRawLog) {
+                alert('請先進行資料掃描後再執行AI審核');
+                return;
+            }
+            
+            // 更新按鈕狀態
+            const originalText = btn.textContent;
+            btn.textContent = 'AI審核中...';
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            
+            try {
+                await startBatchAiReview();
+                btn.textContent = '審核完成';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }, 2000);
+            } catch (error) {
+                console.error('AI審核失敗:', error);
+                btn.textContent = '審核失敗';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }, 2000);
+            }
+        });
         // Load stored custom range into inputs
         const loadCustomRangeToInputs = () => {
             try {
@@ -1277,6 +1320,54 @@
         return { resolved: '未知', accuracy: '0%' };
     };
 
+    // Batch AI review function - only triggered by button click
+    const startBatchAiReview = async () => {
+        if (!window.__ucduc_data || !window.__ucduc_data.inclRawLog) {
+            throw new Error('沒有可審核的資料');
+        }
+        
+        const logs = window.__ucduc_data.inclRawLog;
+        const reviewPromises = [];
+        
+        logs.forEach((log) => {
+            // 只審核有 GPT 回應且尚未完成審核的項目
+            if (log.gptResponse && log.gptResponse !== '無回應' && 
+                (log.resolved === '待審核' || log.resolved === '未知' || log.accuracy === '待審核' || log.accuracy === '0%')) {
+                
+                const promise = requestLlmAssessment(log.content || '', log.gptResponse || '').then(r => {
+                    if (r && r.resolved) {
+                        log.resolved = r.resolved;
+                        log.accuracy = r.accuracy;
+                    }
+                    return r;
+                }).catch(err => {
+                    console.warn('單項AI審核失敗:', err);
+                    return null;
+                });
+                
+                reviewPromises.push(promise);
+            }
+        });
+        
+        if (reviewPromises.length === 0) {
+            throw new Error('沒有需要審核的項目');
+        }
+        
+        // 等待所有審核完成
+        await Promise.all(reviewPromises);
+        
+        // 更新顯示
+        if (window.__ucduc_data) {
+            renderIncludedRawLogTable(window.__ucduc_data.inclRawLog);
+            
+            // 重新計算 KPI（使用最新評估）
+            const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+            const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
+            window.__ucduc_data.kpiSummary = kpi;
+            renderKpiSummary(kpi);
+        }
+    };
+
     // LLM 評估：呼叫背景 service worker，以真正 LLM 回傳結果覆蓋 heuristic
     // 加上簡單快取避免同一組 Q/A 重複呼叫。
     const __llmCache = new Map(); // key: hash(question+answer) -> {resolved, accuracy}
@@ -1433,36 +1524,13 @@
                 time: formatYMDHMS(dt)
             };
 
-            // If GPT responded, display 'AI審核中' to indicate background LLM will assess
+            // If there is a GPT response, show that it's ready for review but don't auto-trigger
             if (pair.gptResponse && pair.gptResponse.content) {
-                pushed.resolved = 'AI審核中';
-                pushed.accuracy = '審核中';
+                pushed.resolved = '待審核';
+                pushed.accuracy = '待審核';
             }
 
             out.push(pushed);
-
-            // 異步升級為 LLM 評估（只發起一次，避免重複請求）
-            if (pair.gptResponse && pair.gptResponse.content) {
-                requestLlmAssessment(pair.userQuestion.content || '', pair.gptResponse.content || '').then(r => {
-                    if (r && r.resolved) {
-                        const target = out.find(o => o.time === formatYMDHMS(dt) && o.userId === pair.userQuestion.userId);
-                        if (target) {
-                            target.resolved = r.resolved;
-                            target.accuracy = r.accuracy;
-                            // 局部更新: 直接重新渲染整個 log 表 (資料量可接受)
-                            if (window.__ucduc_data) {
-                                window.__ucduc_data.inclRawLog = out;
-                                renderIncludedRawLogTable(out);
-                                // KPI 重新計算 (使用最新評估)
-                                const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
-                                const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
-                                window.__ucduc_data.kpiSummary = kpi;
-                                renderKpiSummary(kpi);
-                            }
-                        }
-                    }
-                });
-            }
         });
         
         out.sort((a, b) => a.time.localeCompare(b.time));
@@ -1511,6 +1579,9 @@
             } else if (r.resolved === '部分') {
                 tdResolved.style.color = '#bf8700';
                 tdResolved.style.background = '#fffbeb';
+            } else if (r.resolved === '待審核') {
+                tdResolved.style.color = '#0969da';
+                tdResolved.style.background = '#dbeafe';
             }
             
             const tdAcc = document.createElement('td');
@@ -1551,23 +1622,13 @@
         document.getElementById('kpi-peak-hour-queries').textContent = kpiData.peakHourQueries || '-';
         document.getElementById('kpi-avg-queries-per-user').textContent = kpiData.avgQueriesPerUser || '-';
 
-        // If any LLM assessments are still pending, show '計算中' for these two fields
-        if (kpiData.kpiPending) {
-            document.getElementById('kpi-resolution-rate').textContent = '計算中';
-            document.getElementById('kpi-avg-accuracy').textContent = '計算中';
-        } else {
-            document.getElementById('kpi-resolution-rate').textContent = (kpiData.resolutionRate !== undefined) ? kpiData.resolutionRate + '%' : '-';
-            document.getElementById('kpi-avg-accuracy').textContent = (kpiData.avgAccuracyRate !== undefined) ? kpiData.avgAccuracyRate + '%' : '-';
-        }
+        // Show current results (based on available assessments)
+        document.getElementById('kpi-resolution-rate').textContent = (kpiData.resolutionRate !== undefined) ? kpiData.resolutionRate + '%' : '-';
+        document.getElementById('kpi-avg-accuracy').textContent = (kpiData.avgAccuracyRate !== undefined) ? kpiData.avgAccuracyRate + '%' : '-';
 
-        // If any LLM assessments are still pending, show '計算中' for these fields as well
-        if (kpiData.kpiPending) {
-            document.getElementById('kpi-avg-attempts').textContent = '計算中';
-            document.getElementById('kpi-unresolved').textContent = '計算中';
-        } else {
-            document.getElementById('kpi-avg-attempts').textContent = kpiData.avgResolutionAttempts || '-';
-            document.getElementById('kpi-unresolved').textContent = kpiData.unresolvedQueries || '-';
-        }
+        // Show current metrics
+        document.getElementById('kpi-avg-attempts').textContent = kpiData.avgResolutionAttempts || '-';
+        document.getElementById('kpi-unresolved').textContent = kpiData.unresolvedQueries || '-';
     };
 
     // Ensure pager links on the page use size=100 to show 100 items per page
@@ -1609,9 +1670,29 @@
                 const cur = new URL(location.href);
                 if (cur.searchParams.get('size') !== '100') {
                     cur.searchParams.set('size', '100');
+                    console.debug('ucduc: 更新頁面大小為 100 筆資料');
+                    cur.searchParams.set('size', '100');
                     history.replaceState(null, '', cur.toString());
                 }
             } catch (e) { /* ignore */ }
+
+            // Also check and update any input elements that might control page size
+            const sizeInputs = document.querySelectorAll('input[name="size"], select[name="size"]');
+            sizeInputs.forEach(input => {
+                if (input.value !== '100') {
+                    input.value = '100';
+                    console.debug('ucduc: 更新頁面大小輸入框為 100');
+                }
+            });
+
+            // Force a re-check of the page size after page navigation
+            setTimeout(() => {
+                const currentSize = new URL(location.href).searchParams.get('size');
+                if (currentSize !== '100') {
+                    console.warn('ucduc: 頁面大小未正確設為 100，當前為:', currentSize);
+                }
+            }, 1000);
+
         } catch (e) {
             console.warn('ucduc: setPagerSizeTo100 failed', e);
         }
@@ -1751,10 +1832,20 @@
         __scanAbortController = new AbortController();
         const signal = __scanAbortController.signal;
 
+        // Ensure pager is set to 100 before scanning
+        setPagerSizeTo100();
+
         const table = document.querySelector('.kernel-table-ui');
         const container = table?.closest('.kernel-table-ui');
         const currentUrl = new URL(location.href);
-        const size = currentUrl.searchParams.get('size') || '100';
+        
+        // Force size to be 100
+        const size = '100';
+        if (currentUrl.searchParams.get('size') !== '100') {
+            currentUrl.searchParams.set('size', '100');
+            console.debug('ucduc: scanAllPages - 強制設定頁面大小為 100');
+        }
+        
         const startParam = currentUrl.searchParams.get('startDate') || '';
         const endParam = currentUrl.searchParams.get('endDate') || '';
 
@@ -1778,7 +1869,7 @@
             .map(href => {
                 try {
                     const u = new URL(href, location.origin);
-                    u.searchParams.set('size', '100');
+                    u.searchParams.set('size', '100'); // Force size=100 for all page links
                     return u.toString();
                 } catch (e) { return null; }
             })
@@ -1789,14 +1880,21 @@
         pageLinks.forEach((urlStr) => {
                 try {
                     const u = new URL(urlStr, location.origin);
-                    u.searchParams.set('size', '100');
+                    u.searchParams.set('size', '100'); // Force size=100
                     const p = u.searchParams.get('page');
                     if (p !== null && Number(p) >= 0) byPage.set(p, u.toString());
                 } catch { }
         });
-        if (!byPage.has(currentUrl.searchParams.get('page') || '0')) {
-            byPage.set(currentUrl.searchParams.get('page') || '0', currentUrl.toString());
+        
+        // Ensure current page is included with size=100
+        const currentPageParam = currentUrl.searchParams.get('page') || '0';
+        if (!byPage.has(currentPageParam)) {
+            const currentUrlWith100 = new URL(currentUrl);
+            currentUrlWith100.searchParams.set('size', '100');
+            byPage.set(currentPageParam, currentUrlWith100.toString());
         }
+
+        console.debug('ucduc: scanAllPages - 將掃描', byPage.size, '個頁面，每頁 100 筆資料');
 
         // Fetch each page and parse with DOMParser (in parallel)
         const fetchOpts = { credentials: 'include', signal };
@@ -1838,18 +1936,18 @@
         const data = aggregateDailyUnique(allRows);
         const hourDist = computeHourDistribution(allRows);
         const inclRawLog = buildIncludedRawLog(allRows);
-    const storedRange2 = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
-    const kpiSummary = calculateKpiSummary(allRowsForKpi, storedRange2);
+        const storedRange2 = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+        const kpiSummary = calculateKpiSummary(allRowsForKpi, storedRange2);
         data.hourDist = hourDist;
         data.inclRawLog = inclRawLog;
         data.kpiSummary = kpiSummary;
-    window.__ucduc_data = data;
-    window.__ucduc_allRowsForKpi = allRowsForKpi; // 儲存供異步 LLM 更新 KPI
+        window.__ucduc_data = data;
+        window.__ucduc_allRowsForKpi = allRowsForKpi; // 儲存供異步 LLM 更新 KPI
 
-    // cache the resolved data for this range
-    __rangeCache.set(cacheKey, data);
-    renderData(data);
-    return data;
+        // cache the resolved data for this range
+        __rangeCache.set(cacheKey, data);
+        renderData(data);
+        return data;
     };
 
     const exportPmTemplateCSV = () => {
@@ -1890,12 +1988,47 @@
             console.warn('ucduc: ensureWeekRangeAndQuery failed', e);
         }
 
-    // 2) Force pager size to 100 for better aggregation, then fix visible times
-    setPagerSizeTo100();
-    fixPageTimes();
+        // 2) Force pager size to 100 for better aggregation, then fix visible times
+        setPagerSizeTo100();
+        fixPageTimes();
 
-    // 3) Automatically aggregate across pager (includes single page)
-    scanAllPages();
+        // 3) Automatically aggregate across pager (includes single page)
+        scanAllPages();
+
+        // 4) Set up observer to re-apply size=100 when page content changes
+        const setupPageSizeObserver = () => {
+            try {
+                const targetNode = document.body;
+                const config = { childList: true, subtree: true };
+                
+                const callback = (mutationsList) => {
+                    for (let mutation of mutationsList) {
+                        if (mutation.type === 'childList') {
+                            // Check if pager elements were added/modified
+                            const addedNodes = Array.from(mutation.addedNodes);
+                            const hasPagerChanges = addedNodes.some(node => 
+                                node.nodeType === Node.ELEMENT_NODE && 
+                                (node.classList?.contains('ui-pager') || 
+                                 node.querySelector?.('.ui-pager'))
+                            );
+                            
+                            if (hasPagerChanges) {
+                                setTimeout(() => setPagerSizeTo100(), 100);
+                            }
+                        }
+                    }
+                };
+                
+                const observer = new MutationObserver(callback);
+                observer.observe(targetNode, config);
+                
+                console.debug('ucduc: 設置頁面大小監聽器成功');
+            } catch (e) {
+                console.warn('ucduc: 設置頁面大小監聽器失敗', e);
+            }
+        };
+        
+        setupPageSizeObserver();
     };
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
