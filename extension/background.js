@@ -183,8 +183,7 @@ json
 
 輸入：
 用戶問題:"${q}"
-GPT回答:"${a}"
-`;
+GPT回答:"${a}"`;
 
   const runner = (async () => {
     const release = await acquire();
