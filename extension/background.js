@@ -4,10 +4,153 @@
 // { type: 'llmAssess', question: string, answer: string, model?: string }
 // 回覆: { ok: true, resolved: '是'|'否'|'部分'|'未知', accuracy: '0-100%', raw?: any } 或 { ok:false, error }
 
-const DEFAULT_MODEL = 'deepseek-r1:14b';
+const DEFAULT_MODEL = 'granite4:micro';
 const ENDPOINT = 'https://blowfish-absolute-absolutely.ngrok-free.app/api/generate';
 
+// ============================
+// 基礎工具：字串化、雜湊、正規化
+// ============================
+function toStr(x) {
+  return typeof x === 'string' ? x : String(x ?? '');
+}
+
+function normalizeResolved(v) {
+  const m = toStr(v).trim();
+  return ['是', '否', '部分', '未知'].includes(m) ? m : '未知';
+}
+
+function normalizeAccuracy(v) {
+  if (typeof v === 'number') return Math.max(0, Math.min(100, v)) + '%';
+  if (typeof v === 'string') {
+    const num = parseFloat(v.replace(/%/, ''));
+    if (Number.isFinite(num)) return Math.max(0, Math.min(100, num)) + '%';
+  }
+  return '0%';
+}
+
+// 簡單 DJB2 雜湊避免超長 Map key
+function hashQA(model, q, a) {
+  const s = `${model}\nQ:${q}\nA:${a}`;
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h) + s.charCodeAt(i);
+    h |= 0; // 32-bit
+  }
+  return h >>> 0; // 無號
+}
+
+// ============================
+// 全域並發控制（簡單 semaphore）
+// ============================
+const MAX_CONCURRENCY = 4; // 全域最大外呼並發
+let inFlight = 0;
+const queue = [];
+
+function acquire() {
+  return new Promise((resolve) => {
+    const tryAcquire = () => {
+      if (inFlight < MAX_CONCURRENCY) {
+        inFlight++;
+        resolve(() => {
+          inFlight = Math.max(0, inFlight - 1);
+          const next = queue.shift();
+          if (next) next();
+        });
+      } else {
+        queue.push(tryAcquire);
+      }
+    };
+    tryAcquire();
+  });
+}
+
+// ============================
+// 安全取用：逾時與重試
+// ============================
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function safeFetchJSON(url, options, cfg = {}) {
+  const timeoutMs = Number.isInteger(cfg.timeoutMs) ? cfg.timeoutMs : 20000;
+  const retries = Number.isInteger(cfg.retries) ? cfg.retries : 2;
+  const retryOn = cfg.retryOn || ((status) => status === 429 || (status >= 500 && status < 600));
+
+  let attempt = 0;
+  while (true) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
+    try {
+      const res = await fetch(url, { ...(options || {}), signal: controller.signal });
+      clearTimeout(id);
+      if (!res.ok) {
+        if (attempt < retries && retryOn(res.status)) {
+          attempt++;
+          const backoff = Math.min(2000, 300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 150);
+          await sleep(backoff);
+          continue;
+        }
+        const txt = await res.text().catch(() => '');
+        throw new Error(`LLM HTTP ${res.status}${txt ? `: ${txt.slice(0, 200)}` : ''}`);
+      }
+      // 嘗試 JSON；若失敗回傳空物件
+      const data = await res.json().catch(() => ({}));
+      return data;
+    } catch (e) {
+      clearTimeout(id);
+      // AbortError or network：可重試
+      const isAbort = (e && (e.name === 'AbortError' || /timeout/i.test(String(e))));
+      if (attempt < retries && (isAbort || /NetworkError|Failed to fetch/i.test(String(e)))) {
+        attempt++;
+        const backoff = Math.min(2000, 300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 150);
+        await sleep(backoff);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+// ============================
+// 背景層快取與去重（TTL）
+// ============================
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 分鐘
+const resultCache = new Map(); // key -> { q, a, model, result, expiry }
+const inflightCache = new Map(); // key -> Promise
+
+function getCachedResult(key, q, a, model) {
+  const entry = resultCache.get(key);
+  if (!entry) return null;
+  if (entry.model !== model) return null;
+  if (entry.q !== q || entry.a !== a) return null; // 輕量避免雜湊碰撞
+  if (Date.now() > entry.expiry) {
+    resultCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedResult(key, q, a, model, result) {
+  resultCache.set(key, { q, a, model, result, expiry: Date.now() + CACHE_TTL_MS });
+}
+
+// ============================
+// LLM 呼叫（經過：快取 -> 併發閥 -> safeFetch）
+// ============================
 async function callLLM(question, answer, model = DEFAULT_MODEL) {
+  // 規範化輸入
+  const q = toStr(question);
+  const a = toStr(answer);
+  const m = toStr(model || DEFAULT_MODEL);
+
+  // 背景層快取
+  const key = hashQA(m, q, a);
+  const cached = getCachedResult(key, q, a, m);
+  if (cached) return cached;
+
+  // in-flight 去重
+  if (inflightCache.has(key)) {
+    return inflightCache.get(key);
+  }
+
   const prompt = `你是專業的[知識AI系統]品質稽核AI，負責評估「用戶問題」與「GPT回答」的解題程度與正確性。
 
 ### 評估步驟
@@ -39,41 +182,53 @@ json
 }
 
 輸入：
-用戶問題："${question}"
-GPT回答："${answer}"
+用戶問題:"${q}"
+GPT回答:"${a}"
 `;
 
-  const body = { model, prompt, stream: false };
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true'
-    },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    throw new Error(`LLM HTTP ${res.status}`);
-  }
-  const data = await res.json().catch(() => ({}));
-  // 服務假設回傳 { response: '...文本...' } 或 { data: '...'}
-  const text = data.response || data.data || JSON.stringify(data);
-  let parsed = null;
-  try {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) parsed = JSON.parse(match[0]);
-  } catch (e) {}
-  if (!parsed || typeof parsed !== 'object') {
-    return { ok: true, resolved: '未知', accuracy: '0%', raw: data };
-  }
-  let { resolved, accuracy } = parsed;
-  if (!['是','否','部分','未知'].includes(resolved)) resolved = '未知';
-  if (typeof accuracy === 'number') accuracy = Math.max(0, Math.min(100, accuracy)) + '%';
-  else if (typeof accuracy === 'string') {
-    const num = parseFloat(accuracy.replace(/%/, '')) || 0;
-    accuracy = Math.max(0, Math.min(100, num)) + '%';
-  } else accuracy = '0%';
-  return { ok: true, resolved, accuracy };
+  const runner = (async () => {
+    const release = await acquire();
+    try {
+      const body = { model: m, prompt, stream: false };
+      const data = await safeFetchJSON(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify(body)
+      }, { timeoutMs: 20000, retries: 2 });
+
+      // 服務假設回傳 { response: '...文本...' } 或 { data: '...'} 或 直接 { resolved, accuracy }
+      let resolved = '未知';
+      let accuracy = '0%';
+
+      if (data && typeof data === 'object' && ('resolved' in data || 'accuracy' in data)) {
+        resolved = normalizeResolved(data.resolved);
+        accuracy = normalizeAccuracy(data.accuracy);
+      } else {
+        const text = (data && (data.response || data.data)) ? (data.response || data.data) : JSON.stringify(data || {});
+        try {
+          const match = String(text).match(/\{[\s\S]*\}/);
+          if (match) {
+            const obj = JSON.parse(match[0]);
+            resolved = normalizeResolved(obj.resolved);
+            accuracy = normalizeAccuracy(obj.accuracy);
+          }
+        } catch (_) { /* ignore parse error */ }
+      }
+
+      const result = { ok: true, resolved, accuracy };
+      setCachedResult(key, q, a, m, result);
+      return result;
+    } finally {
+      release();
+      inflightCache.delete(key);
+    }
+  })();
+
+  inflightCache.set(key, runner);
+  return runner;
 }
 
 // Process an array of { question, answer } items in batch with limited concurrency.
