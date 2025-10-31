@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "UserChat Daily Unique Users Counter",
-  "version": "0.2.0",
-  "description": "在 MIS Bot 平台查詢頁面計算每日唯一使用人數，並以 LLM 評估解決率與回答正確率。",
+  "version": "0.3.0",
+  "description": "在 MIS Bot 平台查詢頁面計算每日唯一使用人數，並以 LLM 評估解決率與回答正確率。支援批次評估、並發控制與自動重試機制。",
   "background": {
     "service_worker": "background.js",
     "type": "module"
