@@ -1,8 +1,6 @@
 (() => {
-    // 🔐 Security: Content sanitization function to prevent XSS attacks
     const sanitizeContent = (content) => {
         if (typeof content !== 'string') return '';
-        // Remove HTML tags and potentially dangerous characters
         return content
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
@@ -13,17 +11,15 @@
             .replace(/`/g, '&#x60;');
     };
 
-    // 🔐 Security: Safe DOM element creation helper
     const createSafeElement = (tagName, textContent = '', attributes = {}) => {
         const element = document.createElement(tagName);
         if (textContent) {
-            element.textContent = textContent; // Always use textContent for user data
+            element.textContent = textContent;
         }
         Object.keys(attributes).forEach(key => {
             if (key === 'textContent') {
                 element.textContent = attributes[key];
             } else if (key === 'innerHTML') {
-                // Block innerHTML in attributes for security
                 console.warn('Security: innerHTML blocked, use textContent instead');
             } else {
                 element.setAttribute(key, attributes[key]);
@@ -32,13 +28,10 @@
         return element;
     };
 
-    // 🔐 Security: Safe HTML structure builder (only for static trusted content)
-    // 🔐 Security: Create main panel body structure using safe DOM methods
     const createPanelBodyStructure = () => {
         const body = document.createElement('div');
         body.className = 'ucduc-body';
 
-        // KPI Summary Section
         const kpiSection = document.createElement('div');
         kpiSection.id = 'ucduc-kpi-section';
         kpiSection.style.display = 'block';
@@ -101,7 +94,6 @@
         kpiSection.appendChild(kpiTitle);
         kpiSection.appendChild(kpiTableWrapper);
 
-        // Daily Users Section
         const dailySection = document.createElement('div');
         dailySection.id = 'ucduc-daily-section';
         dailySection.style.display = 'none';
@@ -136,7 +128,6 @@
         dailySection.appendChild(dailySummary);
         dailySection.appendChild(dailyTableWrapper);
 
-        // Hour Distribution Section
         const hourSection = document.createElement('div');
         hourSection.id = 'ucduc-hour-section';
         hourSection.style.display = 'none';
@@ -161,7 +152,6 @@
         hourSection.appendChild(hourTitle);
         hourSection.appendChild(hourTableWrapper);
 
-        // Detailed Log Section
         const logSection = document.createElement('div');
         logSection.id = 'ucduc-log-section';
         logSection.style.display = 'none';
@@ -191,7 +181,6 @@
         logSection.appendChild(logTitle);
         logSection.appendChild(logTableWrapper);
 
-        // Append all sections to body
         body.appendChild(kpiSection);
         body.appendChild(dailySection);
         body.appendChild(hourSection);
@@ -204,7 +193,6 @@
         const panel = document.createElement('div');
         panel.id = 'ucduc-panel';
         
-        // Header section
         const header = document.createElement('div');
         header.className = 'ucduc-header';
         
@@ -214,7 +202,6 @@
         const actions = document.createElement('div');
         actions.className = 'ucduc-actions';
         
-        // Create buttons safely
         const buttons = [
             { id: 'ucduc-toggle-kpi', text: '隱藏KPI', 'data-active': 'true' },
             { id: 'ucduc-toggle-daily', text: '每日統計' },
@@ -230,10 +217,8 @@
             actions.appendChild(button);
         });
         
-        // Date inputs
         const startLabel = document.createElement('label');
         startLabel.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;';
-        // 🔐 Security: Use safe DOM creation instead of innerHTML
         const startText = document.createTextNode('起');
         const startBr = document.createElement('br');
         const startInput = document.createElement('input');
@@ -246,7 +231,6 @@
         
         const endLabel = document.createElement('label');
         endLabel.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;';
-        // 🔐 Security: Use safe DOM creation instead of innerHTML
         const endText = document.createTextNode('迄');
         const endBr = document.createElement('br');
         const endInput = document.createElement('input');
@@ -257,7 +241,6 @@
         endLabel.appendChild(endBr);
         endLabel.appendChild(endInput);
         
-        // Action buttons
         const applyBtn = document.createElement('button');
         applyBtn.id = 'ucduc-apply-range';
         applyBtn.textContent = '套用';
@@ -289,40 +272,31 @@
         actions.append(startLabel, endLabel, applyBtn, clearBtn, scanBtn, exportBtn, aiReviewBtn, closeBtn);
         header.append(title, actions);
         
-        // Body section with table structure
-        // 🔐 Security: Use safe DOM creation instead of innerHTML
         const body = createPanelBodyStructure();
         
         panel.append(header, body);
         return panel;
     };
 
-    // Excluded accounts (not counted in main stats), but logged separately
     const EXCLUDED_USERS = new Set([
-        // 實習生
         'yalkyao','chenxi', 'yingzhiw', 'yutachen', 'yziang',
-        // PM成員
         'yuyuanwang', 'dorislin920', 'emmalai',
-        // 高度相關人員
         'oscarchiu', 'richen', 'allenchen0411', 'yangjo', 'nancyw', 'iiskkchi', 'jackch'
     ]);
-    // Compute current week range (Monday to Friday) in YYYY-MM-DD
     const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
     const toYMD = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     const getCurrentWeekRange = (now = new Date()) => {
-        const dow = now.getDay(); // 0=Sun ... 6=Sat
-        // days since Monday: Mon=0, Tue=1, ..., Sun=6
+        const dow = now.getDay();
         const daysSinceMonday = (dow + 6) % 7;
         const start = new Date(now);
         start.setHours(0, 0, 0, 0);
         start.setDate(start.getDate() - daysSinceMonday);
         const end = new Date(start);
-        end.setDate(start.getDate() + 4); // Monday + 4 = Friday
+        end.setDate(start.getDate() + 4);
         return { startDate: toYMD(start), endDate: toYMD(end) };
     };
 
-    // Parse timestamp like "YYYY-MM-DD HH:mm:ss" as UTC, then use local getters (GMT+8 on client)
-    const TZ_OFFSET_MS = 8 * 60 * 60 * 1000; // GMT+8 (kept for reference, not applied directly)
+    const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
     const parseUtcTimestamp = (ts) => {
         if (!ts) return null;
         const m = ts.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
@@ -332,28 +306,21 @@
         return dt;
     };
 
-    // Utility: compute local day string in GMT+8 from UTC timestamp string
     const toDay = (ts) => {
         const dt = parseUtcTimestamp(ts);
         if (!dt) return null;
-        // Use local timezone (machine time, expected GMT+8)
         return toYMD(dt);
     };
 
-    // Utility: extract hour (0-23) from timestamp string like "YYYY-MM-DD HH:mm:ss"
     const toHour = (ts) => {
         const dt = parseUtcTimestamp(ts);
         if (!dt) return null;
-        // Local hour in client timezone (GMT+8)
         return dt.getHours();
     };
 
-    // Storage key for custom date range
     const STORAGE_KEY = 'ucduc_custom_range';
-    // Storage key for panel position
     const PANEL_POS_KEY = 'ucduc_panel_pos';
 
-    // Wait for table DOM to update (mutation-based) to avoid blind timeouts
     function waitForTableUpdate(timeoutMs = 10000) {
         return new Promise((resolve) => {
             try {
@@ -379,7 +346,6 @@
         });
     }
 
-    // Single-flight range applier to avoid multiple submissions/reloads
     let __rangeApplyLock = false;
     let __rangeApplyPromise = null;
     async function safeApplyRange(range) {
@@ -388,19 +354,16 @@
         __rangeApplyLock = true;
         __rangeApplyPromise = (async () => {
             try {
-                // If URL already has the desired range, do nothing
                 const cur = new URL(location.href);
                 const curStart = cur.searchParams.get('startDate');
                 const curEnd = cur.searchParams.get('endDate');
                 const curSize = cur.searchParams.get('size');
                 
-                // Check if we need to update range or size
                 const needsRangeUpdate = curStart !== range.startDate || curEnd !== range.endDate;
                 const needsSizeUpdate = curSize !== '100';
                 
                 if (!needsRangeUpdate && !needsSizeUpdate) return false;
 
-                // Update inputs if available
                 const startEl = document.querySelector('input[name="startDate"], #startDate');
                 const endEl = document.querySelector('input[name="endDate"], #endDate');
                 if (startEl && endEl) {
@@ -409,7 +372,6 @@
                     const pageEl = document.querySelector('input[name="page"]');
                     if (pageEl) pageEl.value = '0';
                     
-                    // Ensure size is set to 100
                     const sizeEl = document.querySelector('input[name="size"], select[name="size"]');
                     if (sizeEl && sizeEl.value !== '100') {
                         sizeEl.value = '100';
@@ -417,40 +379,31 @@
                     }
                 }
 
-                // Update address bar without reload
                 try {
                     const newUrl = new URL(location.href);
                     newUrl.searchParams.set('startDate', range.startDate);
                     newUrl.searchParams.set('endDate', range.endDate);
-                    newUrl.searchParams.set('size', '100'); // Ensure size=100
+                    newUrl.searchParams.set('size', '100');
                     history.replaceState(history.state, '', newUrl.toString());
                 } catch {}
 
-                // If page exposes SPA refresh API, prefer it to avoid full reload
                 if (typeof window.__refreshData === 'function') {
                     try {
                         await window.__refreshData(range);
-                        // Re-apply size=100 after SPA refresh
                         setTimeout(() => setPagerSizeTo100(), 200);
                         return true;
                     } catch {
-                        // fallback to click
                     }
                 }
 
-                // Fallback: click query button once with disabled guard, and wait for DOM update
                 const queryBtn = document.getElementById('queryButton');
                 if (queryBtn) {
-                    // 若按鈕本身已被外部流程 disable，則不強制觸發
                     if (queryBtn.disabled) return false;
-                    // 不要先行 disable，再 click：被 disable 的按鈕 click 事件不會觸發。
-                    // 以 data 屬性標記 pending，供 CSS 或其他偵測使用。
                     queryBtn.dataset.ucducPending = '1';
                     queryBtn.click();
                     await waitForTableUpdate(10000);
                     delete queryBtn.dataset.ucducPending;
                     
-                    // Re-apply size=100 after button click
                     setTimeout(() => setPagerSizeTo100(), 300);
                     return true;
                 }
@@ -462,7 +415,6 @@
         return __rangeApplyPromise;
     }
 
-    // Apply a given range to page inputs and submit query if possible
     const applyRangeToPage = (range) => {
         if (!range || !range.startDate || !range.endDate) return false;
         const startEl = document.querySelector('input[name="startDate"], #startDate');
@@ -480,11 +432,10 @@
         return false;
     };
 
-    // Save/load panel position
     const savePanelPos = (pos) => {
         try {
             chrome.storage && chrome.storage.sync && chrome.storage.sync.set({ [PANEL_POS_KEY]: pos });
-        } catch (e) { /* ignore */ }
+        } catch (e) { }
     };
 
     const loadPanelPos = (cb) => {
@@ -495,9 +446,7 @@
         } catch (e) { cb && cb(null); }
     };
 
-    // Ensure start/end date inputs are set to this week or a stored custom range; submit query if URL not already using them
     const ensureWeekRangeAndQuery = async () => {
-        // load custom range from chrome.storage.sync (if available)
         const getCustom = () => new Promise(resolve => {
             try {
                 chrome.storage && chrome.storage.sync && chrome.storage.sync.get([STORAGE_KEY], (res) => {
@@ -515,20 +464,16 @@
         const urlEnd = url.searchParams.get('endDate');
         const urlSize = url.searchParams.get('size');
 
-        // If URL already has the desired range and size=100, don't submit again
         if (urlStart === useRange.startDate && urlEnd === useRange.endDate && urlSize === '100') {
-            return false; // no action needed
+            return false;
         }
 
-        // Ensure size is set to 100 in the range we apply
         const rangeWithSize = { ...useRange, size: '100' };
 
-        // Prefer safeApplyRange to avoid duplicate submissions and page reloads
         const changed = await safeApplyRange(rangeWithSize);
         return changed;
     };
 
-    // Extract data rows from current page DOM (robust against missing data-* attributes)
     const extractRows = (root = document) => {
         const rows = [];
         const tableBody = root.querySelector('.kernel-table-ui tbody');
@@ -539,7 +484,6 @@
             const tds = Array.from(tr.querySelectorAll('td'));
             if (tds.length === 0) return;
 
-            // 0: account, 1: source, 2: content, 3: time, 4: control
             const account = (tds[0]?.textContent || '').trim();
             const sourceText = (tds[1]?.textContent || '').trim();
             const timeText = (tds[3]?.textContent || '').trim();
@@ -550,7 +494,7 @@
             const contentFromAttr = a ? a.getAttribute('data-content') : null;
             const chatIdFromAttr = a ? a.getAttribute('data-chatid') : null;
 
-            const uid = account; // always trust visible account
+            const uid = account;
             const gpt = (gptFromAttr || sourceText || 'unknown');
             const t = (timeFromAttr || timeText || '').trim();
 
@@ -572,12 +516,10 @@
         return rows;
     };
 
-    // Format a Date to 'YYYY-MM-DD HH:mm:ss'
     const formatYMDHMS = (d) => {
         return `${toYMD(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
     };
 
-    // Convert visible table times (4th td) from UTC string to GMT+8 for display only
     const fixPageTimes = () => {
         const tableBody = document.querySelector('.kernel-table-ui tbody');
         if (!tableBody) return;
@@ -590,23 +532,21 @@
             const src = (tAttr || tds[3]?.textContent || '').trim();
             const dt = parseUtcTimestamp(src);
             if (!dt) return;
-            const formatted = formatYMDHMS(dt); // local formatting
+            const formatted = formatYMDHMS(dt);
             const span = tds[3].querySelector('span') || tds[3];
             span.textContent = formatted;
-            // Optional: keep original as title
             span.title = `原始(UTC): ${src} → 本地(GMT+8): ${formatted}`;
         });
     };
 
-    // Compute hour distribution for User-originated queries only
     const computeHourDistribution = (rows) => {
         const hourTotals = Array.from({ length: 24 }, () => 0);
-        const hourByUser = {}; // hour index string -> { uid: count }
-        const userTotals = new Map(); // uid -> total count across all hours
+        const hourByUser = {};
+        const userTotals = new Map();
 
         rows.forEach((r) => {
-            if (!r || r.source !== 'User') return; // only count queries from users
-            if (EXCLUDED_USERS.has(r.userId)) return; // excluded from global stats
+            if (!r || r.source !== 'User') return;
+            if (EXCLUDED_USERS.has(r.userId)) return;
             const h = toHour(r.time);
             if (h == null || isNaN(h) || h < 0 || h > 23) return;
             hourTotals[h] += 1;
@@ -615,7 +555,6 @@
             userTotals.set(r.userId, (userTotals.get(r.userId) || 0) + 1);
         });
 
-        // Sort users by total descending to keep columns meaningful
         const userList = Array.from(userTotals.entries())
             .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
             .map(([uid]) => uid);
@@ -623,14 +562,13 @@
         return { hourTotals, hourByUser, userList };
     };
 
-    // Aggregate unique users per day (and per GPT optionally)
     const aggregateDailyUnique = (rows) => {
-        const byDay = new Map(); // day -> Set of userIds
-        const byDayGpt = new Map(); // key day|gpt -> Set of userIds
+        const byDay = new Map();
+        const byDayGpt = new Map();
 
         rows.forEach(({ userId, gptId, day }) => {
             if (!day || !userId) return;
-            if (EXCLUDED_USERS.has(userId)) return; // excluded from global stats
+            if (EXCLUDED_USERS.has(userId)) return;
             const uid = userId.toString().trim();
             const gid = (gptId || 'unknown').toString().trim();
 
@@ -656,7 +594,6 @@
         return { daily, dailyByGpt };
     };
 
-    // Build raw log for excluded users (for CSV export)
     const buildExcludedRawLog = (rows) => {
         const out = [];
         const excludedRows = rows.filter(r => r && r.source === 'User' && EXCLUDED_USERS.has(r.userId));
@@ -668,10 +605,8 @@
             const dt = parseUtcTimestamp(pair.userQuestion.time);
             if (!dt) return;
             
-            // Analyze GPT response quality if available
             let assessment = { resolved: '未知', accuracy: '0%' };
             if (pair.gptResponse && pair.gptResponse.content) {
-                // Use local heuristic only as a fallback; mark as pending for LLM
                 assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
             }
             
@@ -692,17 +627,11 @@
             out.push(pushed);
         });
         
-        // sort by time asc
         out.sort((a, b) => a.time.localeCompare(b.time));
         return out;
     };
 
-    // Calculate KPI summary for the week or a provided custom range
-    // rows: array of all rows (including GPT rows) used for KPI calculation
-    // customRange (optional): { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     const calculateKpiSummary = (rows, customRange) => {
-        // Prefer explicit customRange param. If not provided, try to read panel inputs
-        // (so callers can remain synchronous). Otherwise fall back to current week.
         let startDate, endDate;
         if (customRange && customRange.startDate && customRange.endDate) {
             startDate = customRange.startDate;
@@ -715,14 +644,13 @@
                     startDate = sEl.value;
                     endDate = eEl.value;
                 }
-            } catch (e) { /* ignore DOM access errors */ }
+            } catch (e) { }
         }
         if (!startDate || !endDate) {
             const def = getCurrentWeekRange();
             startDate = def.startDate; endDate = def.endDate;
         }
         
-        // Filter to only include data within current week and from users only
         const weekRows = rows.filter(r => {
             if (!r || r.source !== 'User') return false;
             if (EXCLUDED_USERS.has(r.userId)) return false;
@@ -730,9 +658,9 @@
         });
 
         const uniqueUsers = new Set();
-        const dailyActiveUsers = new Map(); // day -> Set of users
-        const hourlyQueries = new Map(); // hour -> count
-        const userQueryCounts = new Map(); // userId -> count
+        const dailyActiveUsers = new Map();
+        const hourlyQueries = new Map();
+        const userQueryCounts = new Map();
         
     let totalQueries = 0;
         let peakHour = 0;
@@ -740,9 +668,6 @@
         let resolvedCount = 0;
         let totalAccuracyScore = 0;
         let resolutionAttempts = 0;
-        // Removed kpiPending logic - now shows results based on current state
-
-        // Process all historical data to identify new vs returning users
         const allHistoricalUsers = new Set();
         rows.forEach(r => {
             if (!r || r.source !== 'User') return;
@@ -752,14 +677,12 @@
             }
         });
 
-        // Get all week rows including GPT responses for proper pairing
         const allWeekRows = rows.filter(r => {
             if (!r) return false;
             if (EXCLUDED_USERS.has(r.userId)) return false;
             return r.day >= startDate && r.day <= endDate;
         });
 
-        // Process current week data with GPT response analysis
         const userGptPairs = groupUserGptPairs(allWeekRows);
 
         console.debug('ucduc: KPI calculation - userGptPairs count:', userGptPairs.length);
@@ -769,7 +692,6 @@
             const hour = toHour(pair.userQuestion.time);
             let assessment = { resolved: '未知', accuracy: '0%' };
 
-            // If GPT responded, use cached result if available, otherwise use fallback assessment
             if (pair.gptResponse && pair.gptResponse.content) {
                 try {
                     const key = hashKey(pair.userQuestion.content || '', pair.gptResponse.content || '');
@@ -780,7 +702,6 @@
                         if (isFinal) {
                             assessment = { resolved: cached.resolved, accuracy: cached.accuracy };
                         } else {
-                            // Use fallback assessment for pending reviews
                             assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
                         }
                     } else {
@@ -804,17 +725,12 @@
             totalQueries++;
             resolutionAttempts++;
             
-            // Calculate resolution statistics based on GPT response quality
-            // Only '是' counts as resolved (1). '部分', '否', '未知' count as unresolved (0 for resolvedCount)
             if (assessment && typeof assessment.resolved === 'string') {
                 if (assessment.resolved === '是') {
                     resolvedCount++;
                 }
-                // else: '部分'|'否'|'未知' -> treated as unresolved
             }
 
-            // Calculate accuracy score (convert percentage to number)
-            // Skip accuracy when it's a placeholder like '審核中' or non-numeric
             let accuracyNum = 0;
             if (assessment && assessment.accuracy && typeof assessment.accuracy === 'string') {
                 const cleaned = assessment.accuracy.replace('%', '').replace(/[^0-9.]/g, '').trim();
@@ -827,22 +743,18 @@
                 }
             }
             
-            // Daily active users
             if (!dailyActiveUsers.has(pair.userQuestion.day)) {
                 dailyActiveUsers.set(pair.userQuestion.day, new Set());
             }
             dailyActiveUsers.get(pair.userQuestion.day).add(pair.userQuestion.userId);
             
-            // Hourly distribution
             if (hour !== null) {
                 hourlyQueries.set(hour, (hourlyQueries.get(hour) || 0) + 1);
             }
             
-            // User query counts
             userQueryCounts.set(pair.userQuestion.userId, (userQueryCounts.get(pair.userQuestion.userId) || 0) + 1);
         });
 
-        // Find peak hour
         let maxQueries = 0;
         hourlyQueries.forEach((count, hour) => {
             if (count > maxQueries) {
@@ -852,28 +764,21 @@
             }
         });
 
-        // Calculate DAU average (total unique users across all days / number of days)
         const activeDays = dailyActiveUsers.size;
         const totalDailyUsers = Array.from(dailyActiveUsers.values()).reduce((sum, users) => sum + users.size, 0);
         const avgDau = activeDays > 0 ? (totalDailyUsers / activeDays).toFixed(1) : '0';
 
-        // Calculate weekly active users (WAU)
         const wau = uniqueUsers.size;
 
-        // Calculate average queries per user
         const avgQueriesPerUser = wau > 0 ? (totalQueries / wau).toFixed(1) : '0';
 
-        // Calculate actual resolution rate based on content analysis
         const resolutionRate = totalQueries > 0 ? ((resolvedCount / totalQueries) * 100).toFixed(1) : '0';
         
-        // Calculate average accuracy rate
         const avgAccuracyRate = totalQueries > 0 ? (totalAccuracyScore / totalQueries).toFixed(1) : '0';
         
-        // Calculate average resolution attempts (queries per resolved issue)
         const avgResolutionAttempts = resolvedCount > 0 ? (totalQueries / resolvedCount).toFixed(1) : '1.0';
-        
-    // Unresolved queries (do not round; keep fractional values from partial resolutions)
-    const unresolvedQueries = totalQueries - resolvedCount;
+
+        const unresolvedQueries = totalQueries - resolvedCount;
 
         console.debug('ucduc: KPI calculation results:', {
             totalQueries,
@@ -899,16 +804,13 @@
             unresolvedQueries: unresolvedQueries
         };
     };
-    // Render floating panel
     const ensurePanel = () => {
         let panel = document.getElementById('ucduc-panel');
         if (panel) return panel;
         
-        // 🔐 Security: Use safe DOM creation instead of innerHTML
         panel = createPanelStructure();
         document.body.appendChild(panel);
 
-        // Initialize panel position from storage (if any)
         loadPanelPos((pos) => {
             try {
                 if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
@@ -917,10 +819,9 @@
                     panel.style.top = (pos.top) + 'px';
                     panel.style.bottom = 'auto';
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
         });
 
-        // Add drag handle for pointer/touch dragging
         const header = panel.querySelector('.ucduc-header');
         if (header) {
             header.style.cursor = 'grab';
@@ -928,18 +829,15 @@
             header.setAttribute('aria-label', '拖動面板');
         }
 
-        // Dragging state
         let isDragging = false;
         let dragStart = { x: 0, y: 0 };
         let panelStart = { left: 0, top: 0 };
 
         const onPointerDown = (ev) => {
-            // if initial target is an interactive element (button/anchor/input/select/textarea)
-            // or inside the actions area, don't start dragging so clicks still work
             try {
                 const targ = (ev.target && ev.target.closest) ? ev.target.closest('button, a, input, select, textarea, .ucduc-actions') : null;
                 if (targ) return;
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
 
             try {
                 ev.preventDefault();
@@ -948,14 +846,12 @@
             isDragging = true;
             panel.classList.add('dragging');
             header.style.cursor = 'grabbing';
-            panel.style.transition = 'none'; // disable transition while dragging
+            panel.style.transition = 'none';
             dragStart = { x: p.clientX, y: p.clientY };
             const rect = panel.getBoundingClientRect();
-            // compute current left/top in px
             const left = rect.left + window.scrollX;
             const top = rect.top + window.scrollY;
             panelStart = { left, top };
-            // capture pointer for mouse events
             if (ev.pointerId && header.setPointerCapture) header.setPointerCapture(ev.pointerId);
         };
 
@@ -977,37 +873,30 @@
             isDragging = false;
             panel.classList.remove('dragging');
             header.style.cursor = 'grab';
-            // re-enable transition after short timeout
             setTimeout(() => { panel.style.transition = ''; }, 50);
-            // persist position
             try {
                 const rect = panel.getBoundingClientRect();
                 const pos = { left: Math.round(rect.left + window.scrollX), top: Math.round(rect.top + window.scrollY) };
                 savePanelPos(pos);
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
         };
 
-        // Pointer and touch events
         header.addEventListener('pointerdown', onPointerDown, { passive: false });
         window.addEventListener('pointermove', onPointerMove, { passive: false });
         window.addEventListener('pointerup', onPointerUp, { passive: false });
 
-        // Touch fallback (some browsers may not fire pointer events)
         header.addEventListener('touchstart', onPointerDown, { passive: false });
         window.addEventListener('touchmove', onPointerMove, { passive: false });
         window.addEventListener('touchend', onPointerUp, { passive: false });
 
-        // Double-click header to center panel
         header.addEventListener('dblclick', () => {
             panel.style.left = Math.round((window.innerWidth - panel.offsetWidth) / 2) + 'px';
             panel.style.top = Math.round((window.innerHeight - panel.offsetHeight) / 2) + 'px';
             panel.style.right = 'auto';
             panel.style.bottom = 'auto';
-            // save
             try { const rect = panel.getBoundingClientRect(); savePanelPos({ left: Math.round(rect.left + window.scrollX), top: Math.round(rect.top + window.scrollY) }); } catch (e) {}
         });
 
-        // Escape key resets to default bottom-right
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 panel.style.left = 'auto';
@@ -1022,18 +911,15 @@
         panel.querySelector('#ucduc-export')?.addEventListener('click', () => exportCSV());
         panel.querySelector('#ucduc-scan')?.addEventListener('click', () => scanAllPages());
         
-        // AI 審核按鈕事件
         panel.querySelector('#ucduc-ai-review')?.addEventListener('click', async () => {
             const btn = panel.querySelector('#ucduc-ai-review');
             if (!btn) return;
             
-            // 檢查是否有資料可以審核
             if (!window.__ucduc_data || !window.__ucduc_data.inclRawLog) {
                 alert('請先進行資料掃描後再執行AI審核');
                 return;
             }
             
-            // 更新按鈕狀態
             const originalText = btn.textContent;
             btn.textContent = 'AI審核中...';
             btn.disabled = true;
@@ -1057,7 +943,6 @@
                 }, 2000);
             }
         });
-        // Load stored custom range into inputs
         const loadCustomRangeToInputs = () => {
             try {
                 chrome.storage && chrome.storage.sync && chrome.storage.sync.get([STORAGE_KEY], (res) => {
@@ -1065,12 +950,11 @@
                     if (val && val.startDate) document.getElementById('ucduc-start-input').value = val.startDate;
                     if (val && val.endDate) document.getElementById('ucduc-end-input').value = val.endDate;
                 });
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
         };
         loadCustomRangeToInputs();
 
-        // Apply custom range: save to storage and trigger page query + rescan
-    panel.querySelector('#ucduc-apply-range')?.addEventListener('click', async () => {
+        panel.querySelector('#ucduc-apply-range')?.addEventListener('click', async () => {
             const s = document.getElementById('ucduc-start-input').value;
             const e = document.getElementById('ucduc-end-input').value;
             if (!s || !e) {
@@ -1081,16 +965,13 @@
             try {
                 chrome.storage && chrome.storage.sync && chrome.storage.sync.set({ [STORAGE_KEY]: payload }, () => {
                     console.debug('ucduc: saved custom range', payload);
-                    // mirror into window for synchronous access by KPI calculator
                     try { window.__ucduc_custom_range = payload; } catch (e) {}
-            // Apply using safe path and re-scan after DOM updated
-            safeApplyRange(payload).then(() => scanAllPages());
+                    safeApplyRange(payload).then(() => scanAllPages());
                 });
             } catch (err) { console.warn('storage set failed', err); }
         });
 
-        // Clear custom range from storage and reset inputs to current week defaults
-    panel.querySelector('#ucduc-clear-range')?.addEventListener('click', async () => {
+        panel.querySelector('#ucduc-clear-range')?.addEventListener('click', async () => {
             try {
                 chrome.storage && chrome.storage.sync && chrome.storage.sync.remove([STORAGE_KEY], () => {
                     console.debug('ucduc: cleared custom range');
@@ -1098,13 +979,11 @@
                     const { startDate, endDate } = getCurrentWeekRange();
                     document.getElementById('ucduc-start-input').value = startDate;
                     document.getElementById('ucduc-end-input').value = endDate;
-            // Apply default week and rescan (safe)
-            safeApplyRange({ startDate, endDate }).then(() => scanAllPages());
+                    safeApplyRange({ startDate, endDate }).then(() => scanAllPages());
                 });
             } catch (err) { console.warn('storage remove failed', err); }
         });
         
-        // Function to hide all sections
         const hideAllSections = () => {
             document.getElementById('ucduc-kpi-section').style.display = 'none';
             document.getElementById('ucduc-daily-section').style.display = 'none';
@@ -1112,7 +991,6 @@
             document.getElementById('ucduc-log-section').style.display = 'none';
         };
 
-        // Function to reset all button texts and states
         const resetAllButtonTexts = () => {
             const buttons = [
                 { selector: '#ucduc-toggle-kpi', text: 'KPI摘要' },
@@ -1130,7 +1008,6 @@
             });
         };
         
-        // Toggle KPI section
         panel.querySelector('#ucduc-toggle-kpi')?.addEventListener('click', () => {
             const kpiSection = document.getElementById('ucduc-kpi-section');
             const btn = panel.querySelector('#ucduc-toggle-kpi');
@@ -1146,7 +1023,6 @@
             }
         });
 
-        // Toggle Daily section
         panel.querySelector('#ucduc-toggle-daily')?.addEventListener('click', () => {
             const dailySection = document.getElementById('ucduc-daily-section');
             const btn = panel.querySelector('#ucduc-toggle-daily');
@@ -1162,7 +1038,6 @@
             }
         });
 
-        // Toggle Hour section
         panel.querySelector('#ucduc-toggle-hour')?.addEventListener('click', () => {
             const hourSection = document.getElementById('ucduc-hour-section');
             const btn = panel.querySelector('#ucduc-toggle-hour');
@@ -1178,7 +1053,6 @@
             }
         });
 
-        // Toggle Log section
         panel.querySelector('#ucduc-toggle-log')?.addEventListener('click', () => {
             const logSection = document.getElementById('ucduc-log-section');
             const btn = panel.querySelector('#ucduc-toggle-log');
@@ -1196,21 +1070,15 @@
         return panel;
     };
 
-    // Small floating reset viewport: 一個固定在左下角的小按鈕，
-    // 功能: 1) 一鍵重置主面板位置至預設 (右下) 2) 清除儲存的座標。
-    // 避免: 重複插入 (先檢查 id)
     const ensureResetViewport = () => {
-        // Avoid duplicating
         if (document.getElementById('ucduc-reset-viewport')) return;
         const vp = document.createElement('div');
         vp.id = 'ucduc-reset-viewport';
         vp.title = '重置統計面板位置';
-        vp.textContent = '\u21BB'; // circular arrow symbol
+        vp.textContent = '\u21BB';
         vp.addEventListener('click', () => {
-            // If panel not exist create it
             let panel = document.getElementById('ucduc-panel');
             if (!panel) panel = ensurePanel();
-            // Reset to default bottom-right & remove stored position
             panel.style.left = 'auto';
             panel.style.top = 'auto';
             panel.style.right = '16px';
@@ -1226,14 +1094,12 @@
         const summary = document.getElementById('ucduc-summary');
         if (!tbody || !summary || !thead) return;
 
-        // collect all gpt ids across days to build dynamic columns
         const gptSet = new Set();
         Object.values(dailyByGpt || {}).forEach((byGpt) => {
             Object.keys(byGpt).forEach(g => gptSet.add(g));
         });
         const gptList = Array.from(gptSet).sort();
 
-        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
         while (thead.firstChild) {
             thead.removeChild(thead.firstChild);
         }
@@ -1243,7 +1109,6 @@
         gptList.forEach(g => headRow.appendChild(Object.assign(document.createElement('th'), { textContent: g })));
         thead.appendChild(headRow);
 
-        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
         while (tbody.firstChild) {
             tbody.removeChild(tbody.firstChild);
         }
@@ -1261,13 +1126,10 @@
         });
         summary.textContent = `合計天數：${daily.length}；加總唯一人次：${total}`;
 
-        // Render hour distribution
         renderHourTable(hourDist);
 
-        // Render included raw log (統計名單)
         renderIncludedRawLogTable(inclRawLog);
 
-        // Render KPI summary
         renderKpiSummary(kpiSummary);
     };
 
@@ -1282,7 +1144,6 @@
         const hourTotals = (hourDist && hourDist.hourTotals) ? hourDist.hourTotals : Array.from({ length: 24 }, () => 0);
         const hourByUser = (hourDist && hourDist.hourByUser) ? hourDist.hourByUser : {};
 
-        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
         while (theadRow.firstChild) {
             theadRow.removeChild(theadRow.firstChild);
         }
@@ -1290,12 +1151,11 @@
         theadRow.appendChild(Object.assign(document.createElement('th'), { textContent: '查詢數' }));
         userList.forEach((uid) => {
             const th = document.createElement('th');
-            th.textContent = uid; // 直接顯示用戶帳號
+            th.textContent = uid;
             th.title = uid;
             theadRow.appendChild(th);
         });
 
-        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
         while (tbody.firstChild) {
             tbody.removeChild(tbody.firstChild);
         }
@@ -1311,16 +1171,11 @@
         }
     };
 
-    // Previously this function used keyword-based heuristics to assess GPT responses.
-    // The keyword scoring has been removed. Keep a simple neutral fallback so
-    // background LLM assessments (if available) can still overwrite results.
     const assessGptResponseQuality = (content, userQuestion = '') => {
         if (!content) return { resolved: '未知', accuracy: '0%' };
-        // Return neutral defaults; detailed assessment should come from the LLM path.
         return { resolved: '未知', accuracy: '0%' };
     };
 
-    // Batch AI review function - only triggered by button click
     const startBatchAiReview = async () => {
         if (!window.__ucduc_data || !window.__ucduc_data.inclRawLog) {
             throw new Error('沒有可審核的資料');
@@ -1330,7 +1185,6 @@
         const reviewPromises = [];
         
         logs.forEach((log) => {
-            // 只審核有 GPT 回應且尚未完成審核的項目
             if (log.gptResponse && log.gptResponse !== '無回應' && 
                 (log.resolved === '待審核' || log.resolved === '未知' || log.accuracy === '待審核' || log.accuracy === '0%')) {
                 
@@ -1353,14 +1207,11 @@
             throw new Error('沒有需要審核的項目');
         }
         
-        // 等待所有審核完成
         await Promise.all(reviewPromises);
         
-        // 更新顯示
         if (window.__ucduc_data) {
             renderIncludedRawLogTable(window.__ucduc_data.inclRawLog);
             
-            // 重新計算 KPI（使用最新評估）
             const stored = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
             const kpi = calculateKpiSummary(window.__ucduc_allRowsForKpi || [], stored);
             window.__ucduc_data.kpiSummary = kpi;
@@ -1368,40 +1219,30 @@
         }
     };
 
-    // LLM 評估：呼叫背景 service worker，以真正 LLM 回傳結果覆蓋 heuristic
-    // 加上簡單快取避免同一組 Q/A 重複呼叫。
-    const __llmCache = new Map(); // key: hash(question+answer) -> {resolved, accuracy}
+    const __llmCache = new Map();
     const hashKey = (q,a) => {
         try {
             return btoa(unescape(encodeURIComponent(q.slice(0,500) + '||' + a.slice(0,800))));
         } catch { return q.length + ':' + a.length; }
     };
-    // Request LLM assessment via background service worker.
-    // Uses __llmCache to store either a resolved result object or an in-flight Promise
-    // so concurrent requests for the same Q/A are deduplicated.
     const requestLlmAssessment = (question, answer) => {
         if (!question || !answer) return Promise.resolve(null);
         const key = hashKey(question, answer);
 
-        // If we have a cached value which is a final result, return it as a resolved Promise
         if (__llmCache.has(key)) {
             const v = __llmCache.get(key);
-            // If it's a Promise (in-flight), return it so callers share the same request
             if (v && typeof v.then === 'function') return v;
             return Promise.resolve(v);
         }
 
-        // Create an in-flight promise and store it immediately to prevent duplicate sends
         const p = new Promise((resolve) => {
             try {
                 chrome.runtime.sendMessage({ type: 'llmAssess', question, answer }, (resp) => {
                     if (!resp || !resp.ok) {
-                        // remove from cache so future attempts may retry
                         __llmCache.delete(key);
                         resolve(null);
                         return;
                     }
-                    // store the final response object in cache
                     __llmCache.set(key, resp);
                     resolve(resp);
                 });
@@ -1412,16 +1253,13 @@
             }
         });
 
-        // store the in-flight promise so concurrent callers reuse it
         __llmCache.set(key, p);
         return p;
     };
 
-    // Group user questions with corresponding GPT responses using chatId and time-based logic
     const groupUserGptPairs = (rows) => {
         const pairs = [];
         
-        // Group by chatId first (most reliable method)
         const byChatId = new Map();
         rows.forEach(row => {
             if (row.chatId) {
@@ -1432,12 +1270,10 @@
             }
         });
         
-        // Process chat groups - handle multiple user questions in same chatId
         byChatId.forEach((chatRows, chatId) => {
             const userRows = chatRows.filter(r => r.source === 'User').sort((a, b) => a.time.localeCompare(b.time));
             const gptRows = chatRows.filter(r => r.source === 'Gpt').sort((a, b) => a.time.localeCompare(b.time));
             
-            // Pair each user question with the closest GPT response by time
             userRows.forEach(userRow => {
                 let bestGptRow = null;
                 let minTimeDiff = Infinity;
@@ -1457,7 +1293,6 @@
             });
         });
         
-        // Handle rows without chatId - fallback to time-based pairing
         const noChatIdRows = rows.filter(r => !r.chatId);
         if (noChatIdRows.length > 0) {
             const sortedRows = [...noChatIdRows].sort((a, b) => a.time.localeCompare(b.time));
@@ -1465,22 +1300,18 @@
             for (let i = 0; i < sortedRows.length; i++) {
                 const currentRow = sortedRows[i];
                 
-                // Skip if current row is not from User
                 if (currentRow.source !== 'User') continue;
                 
-                // Find the next GPT response for the same user within reasonable time window
                 let gptResponse = null;
                 for (let j = i + 1; j < sortedRows.length; j++) {
                     const nextRow = sortedRows[j];
                     if (nextRow.userId === currentRow.userId && nextRow.source === 'Gpt') {
-                        // Check if time difference is reasonable (within 1 minute)
                         const timeDiff = Math.abs(new Date(nextRow.time) - new Date(currentRow.time));
-                        if (timeDiff <= 60000) { // 1 minute in milliseconds
+                        if (timeDiff <= 60000) {
                             gptResponse = nextRow;
                             break;
                         }
                     }
-                    // Stop if we find another user question from same user
                     if (nextRow.userId === currentRow.userId && nextRow.source === 'User') {
                         break;
                     }
@@ -1496,7 +1327,6 @@
         return pairs;
     };
 
-    // Build included (non-excluded) raw log entries for display
     const buildIncludedRawLog = (rows) => {
         const out = [];
         const userGptPairs = groupUserGptPairs(rows.filter(r => !EXCLUDED_USERS.has(r.userId)));
@@ -1507,14 +1337,11 @@
             const dt = parseUtcTimestamp(pair.userQuestion.time);
             if (!dt) return;
             
-            // Analyze GPT response quality if available
             let assessment = { resolved: '未知', accuracy: '0%' };
             if (pair.gptResponse && pair.gptResponse.content) {
-                // Use local heuristic only as a fallback; mark as pending for LLM
                 assessment = assessGptResponseQuality(pair.gptResponse.content, pair.userQuestion.content);
             }
             
-            // If there is a GPT response, show that LLM assessment is pending until background result arrives
             const pushed = {
                 userId: pair.userQuestion.userId,
                 content: pair.userQuestion.content || '',
@@ -1524,7 +1351,6 @@
                 time: formatYMDHMS(dt)
             };
 
-            // If there is a GPT response, show that it's ready for review but don't auto-trigger
             if (pair.gptResponse && pair.gptResponse.content) {
                 pushed.resolved = '待審核';
                 pushed.accuracy = '待審核';
@@ -1536,14 +1362,11 @@
         out.sort((a, b) => a.time.localeCompare(b.time));
         return out;
     };
-
-    // Render the included raw log table
     const renderIncludedRawLogTable = (logs) => {
         const table = document.getElementById('ucduc-incl-log-table');
         if (!table) return;
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
-        // 🔐 Security: Use safe DOM clearing instead of innerHTML = ''
         while (tbody.firstChild) {
             tbody.removeChild(tbody.firstChild);
         }
@@ -1569,7 +1392,6 @@
             
             const tdResolved = document.createElement('td');
             tdResolved.textContent = r.resolved || '';
-            // Add color coding for resolution status
             if (r.resolved === '是') {
                 tdResolved.style.color = '#2da44e';
                 tdResolved.style.background = '#f0fff4';
@@ -1586,7 +1408,6 @@
             
             const tdAcc = document.createElement('td');
             tdAcc.textContent = r.accuracy || '';
-            // Add color coding for accuracy
             const accuracyNum = parseFloat((r.accuracy || '0%').replace('%', ''));
             if (accuracyNum >= 80) {
                 tdAcc.style.color = '#2da44e';
@@ -1608,8 +1429,6 @@
             tbody.appendChild(tr);
         });
     };
-
-    // Render KPI Summary table
     const renderKpiSummary = (kpiData) => {
         if (!kpiData) return;
         
@@ -1621,20 +1440,13 @@
         document.getElementById('kpi-peak-hour').textContent = (kpiData.peakHour !== undefined) ? kpiData.peakHour + ':00' : '-';
         document.getElementById('kpi-peak-hour-queries').textContent = kpiData.peakHourQueries || '-';
         document.getElementById('kpi-avg-queries-per-user').textContent = kpiData.avgQueriesPerUser || '-';
-
-        // Show current results (based on available assessments)
         document.getElementById('kpi-resolution-rate').textContent = (kpiData.resolutionRate !== undefined) ? kpiData.resolutionRate + '%' : '-';
         document.getElementById('kpi-avg-accuracy').textContent = (kpiData.avgAccuracyRate !== undefined) ? kpiData.avgAccuracyRate + '%' : '-';
-
-        // Show current metrics
         document.getElementById('kpi-avg-attempts').textContent = kpiData.avgResolutionAttempts || '-';
         document.getElementById('kpi-unresolved').textContent = kpiData.unresolvedQueries || '-';
     };
-
-    // Ensure pager links on the page use size=100 to show 100 items per page
     const setPagerSizeTo100 = () => {
         try {
-            // update all pager anchors to include size=100
             const pagerAnchors = Array.from(document.querySelectorAll('.ui-pager a[href*="/UserChat?"]'));
             pagerAnchors.forEach(a => {
                 try {
@@ -1643,10 +1455,9 @@
                     const u = new URL(href, location.origin);
                     u.searchParams.set('size', '100');
                     a.setAttribute('href', u.toString());
-                } catch (e) { /* ignore */ }
+                } catch (e) { }
             });
 
-            // specifically normalize the page-size selector anchors and mark the 100 one as current
             const sizeAnchors = Array.from(document.querySelectorAll('.ui-page-size a[href*="/UserChat?"]'));
             sizeAnchors.forEach(a => {
                 try {
@@ -1662,10 +1473,9 @@
                     } else {
                         a.classList.remove('ui-page-size-current');
                     }
-                } catch (e) { /* ignore */ }
+                } catch (e) { }
             });
 
-            // update current URL in address bar to reflect size=100 without reloading
             try {
                 const cur = new URL(location.href);
                 if (cur.searchParams.get('size') !== '100') {
@@ -1674,9 +1484,8 @@
                     cur.searchParams.set('size', '100');
                     history.replaceState(null, '', cur.toString());
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
 
-            // Also check and update any input elements that might control page size
             const sizeInputs = document.querySelectorAll('input[name="size"], select[name="size"]');
             sizeInputs.forEach(input => {
                 if (input.value !== '100') {
@@ -1685,7 +1494,6 @@
                 }
             });
 
-            // Force a re-check of the page size after page navigation
             setTimeout(() => {
                 const currentSize = new URL(location.href).searchParams.get('size');
                 if (currentSize !== '100') {
@@ -1700,13 +1508,10 @@
 
     
 
-
-    // CSV export (exactly 4 tables: KPI摘要, 每日統計, 時段分析, 詳細log)
     const exportCSV = () => {
         const data = window.__ucduc_data;
         if (!data) return;
 
-        // helper to CSV-escape a value
         const esc = (v) => {
             if (v === null || v === undefined) return '""';
             const s = String(v);
@@ -1715,7 +1520,6 @@
 
         const parts = [];
 
-        // 1) KPI 摘要
         if (data.kpiSummary) {
             parts.push('=== KPI摘要 ===');
             parts.push(['指標', '數值', '備註'].map(esc).join(','));
@@ -1734,7 +1538,6 @@
             parts.push([ '未解決數量', (k.kpiPending ? '計算中' : (k.unresolvedQueries || '-')), '' ].map(esc).join(','));
         }
 
-        // 2) 每日統計
         parts.push('');
         parts.push('=== 每日統計 ===');
         const gptSet = new Set();
@@ -1753,10 +1556,8 @@
             parts.push(row.map(esc).join(','));
         });
 
-        // 3) 時段分析
         parts.push('');
         parts.push('=== 時段分析 ===');
-        // hourDist expected at data.hourDist: { hourTotals, hourByUser, userList }
         const hourDist = data.hourDist || { hourTotals: Array.from({ length: 24 }, () => 0), hourByUser: {}, userList: [] };
         const hourHeaders = ['時段(0-23)', '查詢數', ... (hourDist.userList || [])];
         parts.push(hourHeaders.map(esc).join(','));
@@ -1770,7 +1571,6 @@
             parts.push(row.map(esc).join(','));
         }
 
-        // 4) 詳細log
         parts.push('');
         parts.push('=== 詳細log ===');
         const logHeaders = ['UserId', '用戶問題', 'GPT回答', '是否得到解決', '回答正確率', '對話時間'];
@@ -1802,19 +1602,15 @@
         a.click();
         URL.revokeObjectURL(url);
     };
-
-    // Scan current page only
     const scanCurrent = () => {
         const rows = extractRows();
-        // Filter out excluded users entirely
         const rowsIncluded = rows.filter(r => !EXCLUDED_USERS.has(r.userId));
         console.debug('ucduc: scanCurrent included rows count', rowsIncluded.length);
         const data = aggregateDailyUnique(rowsIncluded);
         const hourDist = computeHourDistribution(rowsIncluded);
         const inclRawLog = buildIncludedRawLog(rowsIncluded);
-    // Try to read stored custom range from storage synchronously via window.__ucduc_custom_range
-    const storedRange = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
-    const kpiSummary = calculateKpiSummary(rows, storedRange); // Use all rows for KPI calculation
+        const storedRange = (window.__ucduc_custom_range && window.__ucduc_custom_range.startDate && window.__ucduc_custom_range.endDate) ? window.__ucduc_custom_range : null;
+        const kpiSummary = calculateKpiSummary(rows, storedRange);
         data.hourDist = hourDist;
         data.inclRawLog = inclRawLog;
         data.kpiSummary = kpiSummary;
@@ -1822,24 +1618,20 @@
         renderData(data);
     };
 
-    // Scan all pages by navigating pager links and fetching content
     let __scanAbortController = null;
     let __scanInFlight = null;
-    const __rangeCache = new Map(); // key `${start}|${end}|size`
+    const __rangeCache = new Map();
     const scanAllPages = async () => {
-        // cancel previous scan if any
         try { if (__scanAbortController) __scanAbortController.abort(); } catch {}
         __scanAbortController = new AbortController();
         const signal = __scanAbortController.signal;
 
-        // Ensure pager is set to 100 before scanning
         setPagerSizeTo100();
 
         const table = document.querySelector('.kernel-table-ui');
         const container = table?.closest('.kernel-table-ui');
         const currentUrl = new URL(location.href);
         
-        // Force size to be 100
         const size = '100';
         if (currentUrl.searchParams.get('size') !== '100') {
             currentUrl.searchParams.set('size', '100');
@@ -1853,40 +1645,35 @@
         if (__rangeCache.has(cacheKey)) {
             const cached = __rangeCache.get(cacheKey);
             if (cached && typeof cached.then === 'function') {
-                // share in-flight
                 return cached;
             }
-            // reuse cached result
             window.__ucduc_data = cached;
             renderData(cached);
             return cached;
         }
 
-        // Discover available pages from pager numbers; if only one, still process
         const pageLinks = Array.from(document.querySelectorAll('.ui-pager a[href*="/UserChat?"]'))
             .map(a => a.getAttribute('href'))
             .filter(Boolean)
             .map(href => {
                 try {
                     const u = new URL(href, location.origin);
-                    u.searchParams.set('size', '100'); // Force size=100 for all page links
+                    u.searchParams.set('size', '100');
                     return u.toString();
                 } catch (e) { return null; }
             })
             .filter(Boolean);
 
-        // Unique URLs (may include first/prev/next/last). Normalize by page param.
         const byPage = new Map();
         pageLinks.forEach((urlStr) => {
                 try {
                     const u = new URL(urlStr, location.origin);
-                    u.searchParams.set('size', '100'); // Force size=100
+                    u.searchParams.set('size', '100');
                     const p = u.searchParams.get('page');
                     if (p !== null && Number(p) >= 0) byPage.set(p, u.toString());
                 } catch { }
         });
         
-        // Ensure current page is included with size=100
         const currentPageParam = currentUrl.searchParams.get('page') || '0';
         if (!byPage.has(currentPageParam)) {
             const currentUrlWith100 = new URL(currentUrl);
@@ -1896,7 +1683,6 @@
 
         console.debug('ucduc: scanAllPages - 將掃描', byPage.size, '個頁面，每頁 100 筆資料');
 
-        // Fetch each page and parse with DOMParser (in parallel)
         const fetchOpts = { credentials: 'include', signal };
         const pageUrls = Array.from(byPage.values());
         const pageDocs = await Promise.all(pageUrls.map(async (urlStr) => {
@@ -1923,7 +1709,6 @@
         });
         console.debug('ucduc: total aggregated included rows from pages', allRows.length);
 
-        // Get all rows (including excluded users) for KPI calculation
         const allRowsForKpi = [];
         pageDocs.forEach((doc) => {
             if (!doc) return;
@@ -1942,9 +1727,8 @@
         data.inclRawLog = inclRawLog;
         data.kpiSummary = kpiSummary;
         window.__ucduc_data = data;
-        window.__ucduc_allRowsForKpi = allRowsForKpi; // 儲存供異步 LLM 更新 KPI
+        window.__ucduc_allRowsForKpi = allRowsForKpi;
 
-        // cache the resolved data for this range
         __rangeCache.set(cacheKey, data);
         renderData(data);
         return data;
@@ -1961,13 +1745,9 @@
         a.click();
         URL.revokeObjectURL(url);
     };
-
-    // Init when DOM ready
     const init = async () => {
         const panel = ensurePanel();
-        // Also ensure the tiny reset viewport exists (placed once per page)
         ensureResetViewport();
-        // Ensure panel inputs reflect stored custom range (if any)
         try {
             chrome.storage && chrome.storage.sync && chrome.storage.sync.get([STORAGE_KEY], (res) => {
                 const val = res && res[STORAGE_KEY];
@@ -1979,23 +1759,19 @@
                 }
                 try { window.__ucduc_custom_range = val || null; } catch (e) {}
             });
-        } catch (e) { /* ignore */ }
+        } catch (e) { }
 
-        // 1) Ensure this week range or custom range is applied; safeApplyRange waits for DOM update
         try {
             await ensureWeekRangeAndQuery();
         } catch (e) {
             console.warn('ucduc: ensureWeekRangeAndQuery failed', e);
         }
 
-        // 2) Force pager size to 100 for better aggregation, then fix visible times
         setPagerSizeTo100();
         fixPageTimes();
 
-        // 3) Automatically aggregate across pager (includes single page)
         scanAllPages();
 
-        // 4) Set up observer to re-apply size=100 when page content changes
         const setupPageSizeObserver = () => {
             try {
                 const targetNode = document.body;
@@ -2004,7 +1780,6 @@
                 const callback = (mutationsList) => {
                     for (let mutation of mutationsList) {
                         if (mutation.type === 'childList') {
-                            // Check if pager elements were added/modified
                             const addedNodes = Array.from(mutation.addedNodes);
                             const hasPagerChanges = addedNodes.some(node => 
                                 node.nodeType === Node.ELEMENT_NODE && 
