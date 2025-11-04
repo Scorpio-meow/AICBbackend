@@ -54,8 +54,8 @@ function acquire() {
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function safeFetchJSON(url, options, cfg = {}) {
-  const timeoutMs = Number.isInteger(cfg.timeoutMs) ? cfg.timeoutMs : 20000;
-  const retries = Number.isInteger(cfg.retries) ? cfg.retries : 2;
+  const timeoutMs = Number.isInteger(cfg.timeoutMs) ? cfg.timeoutMs : 90000;
+  const retries = Number.isInteger(cfg.retries) ? cfg.retries : 3;
   const retryOn = cfg.retryOn || ((status) => status === 429 || (status >= 500 && status < 600));
 
   let attempt = 0;
@@ -169,7 +169,7 @@ GPT回答:"${a}"`;
           'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify(body)
-      }, { timeoutMs: 20000, retries: 2 });
+      }, { timeoutMs: 90000, retries: 3 });
 
       let resolved = '未知';
       let accuracy = '0%';
